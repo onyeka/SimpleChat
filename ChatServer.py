@@ -4,37 +4,46 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
-import os, socket, logging, sys, Client
+from ConfigParser import SafeConfigParser
+import socket, logging, sys, Client
 
 class ChatServer(object):
+    """ Usage: prints out how to use the server
+    """
+    Usage = 'usage: \tpython ChatServer.py\n' \
+    '\t-h: prints this help message and exit'
+    config = SafeConfigParser()
+    config.read('simplechat.cfg')
+    port = config.getint('SectionOne', 'Port')
+    MSG_LEN = config.getint('SectionOne', 'MsgLen')
     def __init__(self):
         self.clients = {}
         self.count = 0
-        self.port = 9060
-        self.MSG_LEN = 2048
 
         # get server's private key
-        self.private_key = ChatServer.getPrivateKey()
+        self.private_key = self.getPrivateKey()
 
         # open up server socket
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_address = (socket.gethostbyname(socket.gethostname()), self.port)
+            self.server_address = (socket.gethostbyname(socket.gethostname()), ChatServer.port)
             self.sock.bind(self.server_address)
-            logging.debug("Initialized UDP Server.... %s", self.server_address)
+            print "Initialized UDP Server....", self.server_address
         except RuntimeError, e:
-            logging.debug("Initializing server socket failed: %s", os.strerror(e.errno))
+            print "Initializing server socket failed: ", e
 
     def getPrivateKey(self):
-        # open up files
         try:
-            with open("server_private_key.txt", 'rb') as f:
-                private_key = f.read()
-                f.close()
-                return private_key
+            with open("server_private_key.pem", 'rb') as key_file:
+                private_key = serialization.load_pem_private_key(
+                    key_file.read(),
+                    password=None,
+                    backend=default_backend()
+                )
+            return private_key
         except IOError as e :
-            logging.debug(" couldn't get server private key: Error: %s", e)
+            print " couldn't read server private key:", e
             sys.exit(-1)
 
     # Handles messages sent from clients
@@ -43,7 +52,7 @@ class ChatServer(object):
 
     # Receives messages sent from clients
     def receiveClientMessages(self):
-        msg, addr = self.sock.recvfrom(ChatServer.MSGLEN)
+        msg, addr = self.sock.recvfrom(ChatServer.MSG_LEN)
         isClientKnown = self.clients.has_key(addr)
         if(isClientKnown):
             client = self.clients.get(addr)
@@ -54,6 +63,11 @@ class ChatServer(object):
                                                          client.getInitializationVector(),
                                                          msg)
             self.handleClientMessages(decrypted_msg, client)
+        else:
+            """
+            TODO: perform challenge and create client object if client is valid
+            """
+            print "it's a new client!!"
 
     def encryptUsingPublicKey(self, key, data):
         print "Using public key to encrypt the data"
@@ -120,7 +134,14 @@ class ChatServer(object):
         return pem, pem_public
 
     def main(self, argv):
-        # setup logging
-        logging.basicConfig(level=logging.DEBUG, format='(%(threadName)-10s) %(message)s')
-        chatServer = ChatServer()
-        chatServer.main(argv[1:])
+        if len(argv) >= 1:
+            if(argv[0] != '-h'):
+                print "Error!! Invalid argument(s) used"
+            print ChatServer.Usage
+        else:
+            self.receiveClientMessages()
+
+
+if __name__ == "__main__":
+    chatServer = ChatServer()
+    chatServer.main(sys.argv[1:])
