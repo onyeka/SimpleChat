@@ -13,7 +13,7 @@ class ChatServer(object):
     Usage = 'usage: \tpython ChatServer.py\n' \
     '\t-h: prints this help message and exit'
     config = SafeConfigParser()
-    config.read('simplechat.cfg')
+    config.read('server.cfg')
     port = config.getint('SectionOne', 'Port')
     MSG_LEN = config.getint('SectionOne', 'MsgLen')
     def __init__(self):
