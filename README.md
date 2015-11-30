@@ -8,7 +8,6 @@ chat server needs to be run to enable users connect to each other. Below are the
 passwords of the pre-configured users. Ability to add new users dynamically would be added
 later.
 
-UserName                Password
-Samson13                Bringston*13
-Tricia_S                tricia
-Marshal09               BeNS0n*09
+UserNames: Samson13,        Tricia_S,   Marshal09
+
+Passwords: Bringston*13,    tricia,     BeNS0n*09
