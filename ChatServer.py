@@ -10,7 +10,7 @@ import socket, logging, sys, Client
 class ChatServer(object):
     """ Usage: prints out how to use the server
     """
-    Usage = 'usage: \tpython ChatServer.py\n' \
+    USAGE = 'usage: \tpython ChatServer.py\n' \
     '\t-h: prints this help message and exit'
     config = SafeConfigParser()
     config.read('server.cfg')
@@ -133,15 +133,16 @@ class ChatServer(object):
         # Making the function also return them in case we want to store in variables.
         return pem, pem_public
 
-    def main(self, argv):
-        if len(argv) >= 1:
-            if(argv[0] != '-h'):
-                print "Error!! Invalid argument(s) used"
-            print ChatServer.Usage
-        else:
-            self.receiveClientMessages()
-
+def main(argv):
+    if len(argv) >= 1:
+        if(len(argv) == 1 and argv[0] != '-h'):
+            print "Error!! Invalid argument(s) used"
+        print ChatServer.USAGE
+    else:
+        chatServer = ChatServer()
+        if(chatServer != None):
+            while True:
+                chatServer.receiveClientMessages()
 
 if __name__ == "__main__":
-    chatServer = ChatServer()
-    chatServer.main(sys.argv[1:])
+    main(sys.argv[1:])
