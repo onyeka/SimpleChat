@@ -1,13 +1,8 @@
 from ConfigParser import SafeConfigParser
 import socket
 import threading
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives import hashes, hmac
-from cryptography.hazmat.primitives.asymmetric import padding
-import os
+
+import CryptoLib
 import sys
 
 
@@ -22,7 +17,9 @@ class ChatClient(object):
     config.read('client.cfg')
     salt = config.getint('SectionOne', 'Salt')
     hKey = config.getint('SectionOne', 'HKey')
+    prime = config.getint('SectionOne', 'PM')
     MSG_LEN = config.getint('SectionOne', 'MsgLen')
+    generator = config.getint('SectionOne', 'Generator')
 
     def __init__(self, ipAddr, port):
         self.serverAddr = ipAddr
@@ -30,6 +27,11 @@ class ChatClient(object):
         self.count = 3 # only 3 login attempts are allowed
         self.isAuthenticated = False
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.peers = {}
+
+        self.serverPublicKey = self.getServerPublicKey()
+        if(self.serverPublicKey == -1):
+            sys.exit(-1)
 
     def login(self):
         while(self.count != 0):
@@ -38,7 +40,9 @@ class ChatClient(object):
             print "username: ", self.username
             password = input("Please enter your password: ")
             print "password: ", self.password
-            pwdHash = self.generatePasswordHash(password)
+            pwdHash = CryptoLib.generateSaltedPasswordHash(ChatClient.hKey,
+                                                           ChatClient.salt,
+                                                           password)
             self.isAuthenticated = self.authenticateMe(pwdHash)
             if(self.isAuthenticated == True):
                 print "===============================\n" \
@@ -54,77 +58,61 @@ class ChatClient(object):
         else:
             return self.isAuthenticated
 
-    def authenticateMe(self):
+    def receiveMessage(self):
+        data, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
+        return data
+
+    def sendMessage(self, msg, addr, port):
+        ret = False
+        try:
+            self.sock.sendto(msg, (addr, port))
+            ret = True
+        except Exception, e:
+            print "send message failed: ", e
+        return ret
+
+    def authenticateMe(self, pwdHash):
         print "authenticate with chat server and set up session key"
+        ret = False
+        if(self.serverPublicKey != None):
+            # step 1: send authentication message
+            msg = "Authenticate:"
+            if(self.sendMessage(msg, self.serverAddr, self.port) == False):
+                return ret
+
+            # step 2: receive challenge
+            challenge = self.receiveMessage()
+
+            # step 3: handle challenge and generate response as well as
+            # Diffie Hellman contribution
+            # TODO: handle challenge received and generate response
+            clientContribution = CryptoLib.generateDHContribution(ChatClient.generator,
+                                                                  ChatClient.prime)
+
+            # step 4: encrypt client contribution and send response
+            clientCipher = CryptoLib.encryptUsingPublicKey(self.serverPublicKey,
+                                                           clientContribution)
+            msg = "Response:todo:%s:%s" % (self.username, clientCipher)
+            if(self.sendMessage(msg, self.serverAddr, self.port) == False):
+                return ret
+
+            # step 5: receive server contribution and hash
+            serverContribution = self.receiveMessage()
+
+            # step 6: TODO: calculate session key and hash
+
+            # step 7: send server client's public key
+            ret = True
+        return ret
+
+    def peerConnection(self, peerUsername, msg):
+        print "connect to peer: ", peerUsername
 
     def receiveMessages(self):
         print "receive messages..."
 
-    def encryptUsingPublicKey(self, key, data):
-        print "Use private key to encrypt the data"
-        cipher_text = key.encrypt(
-            data,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA1()),
-                algorithm=hashes.SHA1(),
-                label=None
-            )
-        )
-        return cipher_text
-
-    def encyptUsingSymetricKey(self, key, data):
-        print "Use shared key to encrypt data"
-        backend = default_backend()
-        key = os.urandom(32)
-        iv = os.urandom(16)
-        cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=backend)
-        encryptor = cipher.encryptor()
-        ct = encryptor.update(data) + encryptor.finalize()
-        return ct
-
-
     def ListOfClients(self):
         print "Get list of clients from server"
-
-    def decryptUsingPrivateKey(self, key, cipher):
-        print "Decrypt the data using private key"
-        data = key.decrypt(
-            cipher,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA1()),
-                algorithm=hashes.SHA1(),
-                label=None
-            )
-        )
-
-    def decryptUsingSymetricKey(self, key):
-        print "Decrypt using the shared key"
-
-
-    # generates and returns the private and public keys.
-    def generatePublicPrivateKeys(self):
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
-
-        public_key = private_key.public_key()
-        pem = private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption())
-        pem_public = public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
-
-        # Just writing them into files for now, we can decide where and how to store them, maybe just use variables?
-        with open("client_private_key.txt", "w") as f:
-            f.write(str(pem))
-
-        with open("client_public_key.txt", "w") as f:
-            f.write(str(pem_public))
-
-        # Making the function also return them in case we want to store in variables.
-        return pem, pem_public
-
-    def generatePasswordHash(self, password):
-        h = hmac.HMAC(ChatClient.hKey, hashes.SHA256(), backend=default_backend())
-        h.update(ChatClient.salt+password)
-        pwdHash = h.finalize()
-        print " password Hash: ", pwdHash
-        return pwdHash
 
 def main(argv):
     if (len(argv) != 4) or (argv[0] != "-sip" and argv[2] != "-sp"):
@@ -149,9 +137,16 @@ def main(argv):
             thread.start()
         # wait for user to give us input
         while True:
-            print("Type your messages:")
-            msg = input("Type your messages: ")
-            #chatClient.send_msg(msg)
+            msg = input("Type your messages to the server: ")
+            msgSplit = msg.split()
+            if(len(msgSplit) == 1):
+                if(msgSplit[0] == 'list'):
+                    chatClient.ListOfClients()
+            elif(len(msgSplit) == 3):
+                if(msgSplit[0] == 'send'):
+                    ret = chatClient.peerConnection(msgSplit[1], msgSplit[2])
+                    if(ret == True):
+                        print "connected to peer"
 
 if __name__ == "__main__":
     main(sys.argv[1:])
