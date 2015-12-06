@@ -8,16 +8,6 @@ from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
 import os
 
-def generateDHContribution(g, p):
-    """
-    Generate Diffie Hellman contribution
-    :param g: generator
-    :param p: safe prime
-    :return: contribution
-    """
-    a = os.urandom(16)
-    return pow(g,a,p)
-
 def getServerPublicKey(filePath):
     """
     Get server public key file
@@ -32,9 +22,37 @@ def getServerPublicKey(filePath):
                 backend=default_backend()
             )
         return publicKey
-    except IOError as e :
+    except IOError as e:
         print " couldn't read ", filePath, " : ", e
         return -1
+
+def generateRandomKey(bits):
+    return os.urandom(bits)
+
+def generateDHContribution(g, p):
+    """
+    Generate Diffie Hellman contribution
+    :param g: generator
+    :param p: safe prime
+    :return: contribution
+    """
+    a = os.urandom(16)
+    return a, pow(g, a, p)
+
+def generateKeyHash(key):
+    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(key)
+    return digest.finalize()
+
+def generateSecretKey(otherContribution, clientKey, prime):
+    """
+    Generate Diffie Hellman secret key
+    :param clientKey: client's private secret key
+    :param otherContribution: contribution from the other party
+    :param prime: modulus
+    :return:
+    """
+    return pow(otherContribution, clientKey, prime)
 
 def generateSaltedPasswordHash(hKey, salt, password):
     """
@@ -45,10 +63,11 @@ def generateSaltedPasswordHash(hKey, salt, password):
     :return: cipher text
     """
     h = hmac.HMAC(hKey, hashes.SHA256(), backend=default_backend())
-    h.update(salt+password)
+    h.update(salt + password)
     pwdHash = h.finalize()
     print " password Hash: ", pwdHash
     return pwdHash
+
 
 def generatePublicPrivateKeys():
     """
@@ -58,8 +77,10 @@ def generatePublicPrivateKeys():
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
 
     public_key = private_key.public_key()
-    pem = private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption())
-    pem_public = public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
+    pem = private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8,
+                                    encryption_algorithm=serialization.NoEncryption())
+    pem_public = public_key.public_bytes(encoding=serialization.Encoding.PEM,
+                                         format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     # Just writing them into files for now, we can decide where and how to store them, maybe just use variables?
     with open("client_private_key.txt", "w") as f:
@@ -70,6 +91,7 @@ def generatePublicPrivateKeys():
 
     # Making the function also return them in case we want to store in variables.
     return pem, pem_public
+
 
 def encryptUsingPublicKey(key, data):
     """
@@ -89,7 +111,8 @@ def encryptUsingPublicKey(key, data):
     )
     return cipher_text
 
-def encyptUsingSymmetricKey(key, data):
+
+def encyptUsingSymmetricKey(key, iv, data):
     """
     Encrypt message using symmetric key
     :param key: symmetric key
@@ -98,12 +121,13 @@ def encyptUsingSymmetricKey(key, data):
     """
     print "Use shared key to encrypt data"
     backend = default_backend()
-    key = os.urandom(32)
-    iv = os.urandom(16)
+    #key = os.urandom(32)
+    #iv = os.urandom(16)
     cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=backend)
     encryptor = cipher.encryptor()
     ct = encryptor.update(data) + encryptor.finalize()
     return ct
+
 
 def decryptUsingPrivateKey(key, cipher):
     """
@@ -122,6 +146,7 @@ def decryptUsingPrivateKey(key, cipher):
         )
     )
     return data
+
 
 def decryptUsingSymetricKey(key):
     print "Decrypt using the shared key"

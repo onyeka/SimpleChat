@@ -29,7 +29,7 @@ class ChatClient(object):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.peers = {}
 
-        self.serverPublicKey = self.getServerPublicKey()
+        self.serverPublicKey = CryptoLib.getServerPublicKey()
         if(self.serverPublicKey == -1):
             sys.exit(-1)
 
@@ -39,7 +39,7 @@ class ChatClient(object):
             self.username = input("Please enter your username: ")
             print "username: ", self.username
             password = input("Please enter your password: ")
-            print "password: ", self.password
+            print "password: ", password
             pwdHash = CryptoLib.generateSaltedPasswordHash(ChatClient.hKey,
                                                            ChatClient.salt,
                                                            password)
@@ -58,7 +58,7 @@ class ChatClient(object):
         else:
             return self.isAuthenticated
 
-    def receiveMessage(self):
+    def receiveResponse(self):
         data, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
         return data
 
@@ -76,18 +76,19 @@ class ChatClient(object):
         ret = False
         if(self.serverPublicKey != None):
             # step 1: send authentication message
-            msg = "Authenticate:"
+            msg = "authenticate:"
             if(self.sendMessage(msg, self.serverAddr, self.port) == False):
                 return ret
 
             # step 2: receive challenge
-            challenge = self.receiveMessage()
+            challenge = self.receiveResponse()
 
             # step 3: handle challenge and generate response as well as
             # Diffie Hellman contribution
             # TODO: handle challenge received and generate response
-            clientContribution = CryptoLib.generateDHContribution(ChatClient.generator,
-                                                                  ChatClient.prime)
+            secretKey, clientContribution = \
+                CryptoLib.generateDHContribution(ChatClient.generator,
+                                                 ChatClient.prime)
 
             # step 4: encrypt client contribution and send response
             clientCipher = CryptoLib.encryptUsingPublicKey(self.serverPublicKey,
@@ -97,22 +98,37 @@ class ChatClient(object):
                 return ret
 
             # step 5: receive server contribution and hash
-            serverContribution = self.receiveMessage()
+            serverContribution, secretKeyHash = self.receiveResponse()
 
             # step 6: TODO: calculate session key and hash
-
-            # step 7: send server client's public key
-            ret = True
+            sessionKey = CryptoLib.generateSecretKey(serverContribution, secretKey,
+                                                          ChatClient.prime)
+            if(secretKeyHash == CryptoLib.generateKeyHash(sessionKey)):
+                self.sessionKey = sessionKey
+                self.sessionID = CryptoLib.generateRandomKey(16)
+                # step 7: send server client's public key
+                ret = True
         return ret
 
     def peerConnection(self, peerUsername, msg):
+        ret = False
         print "connect to peer: ", peerUsername
+        peerCipher = CryptoLib.encyptUsingSymmetricKey(self.sessionKey,
+                                                   self.sessionID, peerUsername)
+        msg = "connect:%s:%s" % self.sessionID, peerCipher
+        if(self.sendMessage(msg, self.serverAddr, self.port) == False):
+                return ret
+        ticket = self.receiveResponse()
 
-    def receiveMessages(self):
+    def receiveChatMessages(self):
         print "receive messages..."
 
     def ListOfClients(self):
         print "Get list of clients from server"
+        msg = "list:"
+        self.sendMessage(msg,self.serverAddr, self.port)
+        response = self.receiveResponse()
+        print "list of clients: ", response
 
 def main(argv):
     if (len(argv) != 4) or (argv[0] != "-sip" and argv[2] != "-sp"):
@@ -126,14 +142,14 @@ def main(argv):
             print "couldn't get ip address or port:", e
             sys.exit(-1)
 
-        # create the client and spawn a thread to
+        # create the client, login and spawn a thread to
         # receive data continuously from the server/clients
         chatClient = ChatClient(ipAddr, port)
 
         # login
         if(chatClient.login() == True):
             #Not sure we need to use a thread
-            thread = threading.Thread(name='Messages', target=chatClient.receiveMessages)
+            thread = threading.Thread(name='Messages', target=chatClient.receiveChatMessages)
             thread.start()
         # wait for user to give us input
         while True:
@@ -141,7 +157,7 @@ def main(argv):
             msgSplit = msg.split()
             if(len(msgSplit) == 1):
                 if(msgSplit[0] == 'list'):
-                    chatClient.ListOfClients()
+                    chatClient.listOfClients()
             elif(len(msgSplit) == 3):
                 if(msgSplit[0] == 'send'):
                     ret = chatClient.peerConnection(msgSplit[1], msgSplit[2])
