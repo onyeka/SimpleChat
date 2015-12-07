@@ -11,3 +11,5 @@ later.
 UserNames: Samson13,        Tricia_S,   Marshal09
 
 Passwords: Bringston*13,    tricia,     BeNS0n*09
+
+SafePrimes: 3779,           2879,       2903
