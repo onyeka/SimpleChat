@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
 import os
 
-def getServerPublicKey(filePath):
+def getPublicKey(filePath):
     """
     Get server public key file
     :param filePath: path to file
@@ -18,7 +18,6 @@ def getServerPublicKey(filePath):
         with open(filePath, 'rb') as keyFile:
             publicKey = serialization.load_pem_public_key(
                 keyFile.read(),
-                password=None,
                 backend=default_backend()
             )
         return publicKey
@@ -27,7 +26,7 @@ def getServerPublicKey(filePath):
         return -1
 
 def generateRandomKey(bits):
-    return os.urandom(bits)
+    return int((os.urandom(bits)).encode('hex'), 16)
 
 def generateDHContribution(g, p):
     """
@@ -42,7 +41,7 @@ def generateDHContribution(g, p):
 def generateKeyHash(key):
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
     digest.update(key)
-    return digest.finalize()
+    return (digest.finalize()).encode('hex')
 
 def generateSecretKey(otherContribution, clientKey, prime):
     """
