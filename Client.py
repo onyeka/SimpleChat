@@ -1,25 +1,40 @@
 __author__ = 'onyekaigabari'
 
-class Client(object):
+class User(object):
     def __init__(self, name, address):
         self.username = name
-        self.loggedIn = True
+        self.authenticated = False
         self.address = address
+        self.sessionKey = None
+        self.iv = None
+        self.sessionKeyHash = None
+        self.publicKey = None
 
-    def getName(self):
-        return self.username
 
     def getAddress(self):
         return self.address
 
-    def setSessionKey(self, sessionKey):
-        self.sessionKey = sessionKey
+    def getInitializationVector(self):
+        return self.iv
+
+    def getName(self):
+        return self.username
+
+    def getPublicKey(self):
+        return self.publicKey
 
     def getSessionKey(self):
         return self.sessionKey
 
+    def getSessionKeyHash(self):
+        return self.sessionKeyHash
+
+    def setPublicKey(self, publicKey):
+        self.publicKey = publicKey
+
+    def setSessionKeyAndHash(self, sessionKey, sessionKeyHash):
+        self.sessionKey = sessionKey
+        self.sessionKeyHash = sessionKeyHash
+
     def setInitializationVector(self, iv):
         self.iv = iv
-
-    def getInitializationVector(self):
-        return self.iv
