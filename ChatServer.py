@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from ConfigParser import SafeConfigParser
-import socket, logging, sys, Client
+import socket, logging, sys, Client, random, CryptoLib
 
 class ChatServer(object):
     """ Usage: prints out how to use the server
@@ -16,6 +16,7 @@ class ChatServer(object):
     config.read('server.cfg')
     port = config.getint('SectionOne', 'Port')
     MSG_LEN = config.getint('SectionOne', 'MsgLen')
+    generator = config.getint('SectionOne', 'Generator')
     def __init__(self):
         self.clients = {}
         self.count = 0
@@ -46,9 +47,79 @@ class ChatServer(object):
             print " couldn't read server private key:", e
             sys.exit(-1)
 
+    def sendMessage(self, msg, addr):
+        ret = False
+        try:
+            self.sock.sendto(msg, addr)
+            ret = True
+        except Exception, e:
+            print "send message failed: ", e
+        return ret
+
+    # gives a tuple with the response to be gotten,
+    # the challenge to send and the accompanying number to be sent
+    def challengeResponse(self):
+        # generate a sufficiently large random number
+        num = random.randrange(100000, 1000000)
+        # generate a random number to subtract from it
+        firstFew = random.randrange(1000, 10000)
+        firstFew = num - firstFew
+        # create the challenge hash
+        challenge = CryptoLib.generateKeyHash(str(num))
+        return num, challenge, firstFew
+
     # Handles messages sent from clients
-    def handleClientMessages(self, msg, client):
-        logging.debug(" message received: %s", msg)
+    def handleClientMessages(self, msg, knownClient, addr):
+        print " message received: '%s'" % msg
+        msgContents = msg.split(":")
+
+        if msgContents[0] == "AUTH":
+            self.challengeAnswer, challenge, firstFew = self.challengeResponse()
+            msg = str(challenge) + ":" + str(firstFew)
+            print "sending AUTH Ans: %d, challenge: %d, firstFew: %d, msg: %s" % \
+                  (self.challengeAnswer, int(challenge, 16), firstFew, msg)
+            self.sendMessage(msg, addr)
+        elif msgContents[0] == "SOLV":
+            if int(msgContents[1]) == self.challengeAnswer:
+                print " solved!!!! %s, ans: %s, user: %s" % \
+                      (msgContents[1], self.challengeAnswer, msgContents[2])
+                client = Client.User(msgContents[2], addr)
+                self.clients[addr] = client
+        elif msgContents[0] == "CONT":
+            clientContribution = msgContents[1]
+            #**************************************************
+            # Start authentication procedure (Augmented PDM)
+            #**************************************************
+            b = CryptoLib.generateRandomKey(16)
+            # retrieve the safe prime for the user
+            primeTag = 'P' + (self.clients[addr]).getName()
+            p = ChatServer.config.getint('SectionTwo', primeTag)
+            print "prime for client: %s ==> %s" % (primeTag, p)
+            # generate server contribution (2^b mod p) to send to server
+            serverContribution = pow(ChatServer.generator, b, p)
+
+            # retrieve the password hash for the user
+            pwdHashTag = 'W' + (self.clients[addr]).getName()
+            # 2^W mod p
+            pwdHash = ChatServer.config.getint('SectionTwo', pwdHashTag)
+
+            # 2^ab mod p
+            sharedKey1 = CryptoLib.generateSecretKey(clientContribution, b, p)
+            # 2^bW mod p
+            sharedKey2 = CryptoLib.generateSecretKey(pwdHash, b, p)
+            sessionKey = str(sharedKey1) + ":" + str(sharedKey2)
+            print "Server: sharedKey1: %s, sharedKey2: %s, sessionKey: %s" % (sharedKey1,
+                                                                      sharedKey2, sessionKey)
+            # HASH(2^ab mod p, 2^bW modp)
+            sessionKeyHash = CryptoLib.generateKeyHash(sessionKey)
+            if knownClient is not None:
+                knownClient.setSessionKeyAndHash(sessionKey, sessionKeyHash)
+                msg = serverContribution + ":" + sessionKeyHash
+                self.sendMessage(msg, addr)
+            else:
+                print "Server: unknown client!!!"
+        else:
+            print "Server: unknown message: ", msg
 
     # Receives messages sent from clients
     def receiveClientMessages(self):
@@ -57,30 +128,19 @@ class ChatServer(object):
         if(isClientKnown):
             client = self.clients.get(addr)
             if(client == None):
-                logging.debug("couldn't retrieve client")
+                print "couldn't retrieve client"
                 return
-            decrypted_msg = self.decryptUsingSymetricKey(client.getSessionKey(),
-                                                         client.getInitializationVector(),
-                                                         msg)
-            self.handleClientMessages(decrypted_msg, client)
+            if client.getSessionKey() is None:
+                decrypted_msg = CryptoLib.decryptUsingPrivateKey(self.private_key, msg)
+            else:
+                decrypted_msg = self.decryptUsingSymetricKey(client.getSessionKey(),
+                                                             client.getInitializationVector(),
+                                                             msg)
+
+            self.handleClientMessages(decrypted_msg, client, addr)
         else:
-            """
-            TODO: perform challenge and create client object if client is valid
-            """
-            print "it's a new client!!"
-
-    def encryptUsingPublicKey(self, key, data):
-        print "Using public key to encrypt the data"
-        cipher_text = key.encrypt(
-            data,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA1()),
-                algorithm=hashes.SHA1(),
-                label=None
-            )
-        )
-        return cipher_text
-
+            print "it's a potential client!!"
+            self.handleClientMessages(msg, None, addr)
 
     def encyptUsingSymetricKey(self, key, iv, data):
         print "Using shared key to encrypt data"
@@ -93,45 +153,6 @@ class ChatServer(object):
 
     def createToken(self, client1, client2):
         print "Create token for the clients to talk to each other"
-
-
-    def decryptUsingPrivateKey(self, key, cipher):
-        print "Decrypt the data using private key"
-        data = key.decrypt(
-            cipher,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA1()),
-                algorithm=hashes.SHA1(),
-                label=None
-            )
-        )
-
-
-    def decryptUsingSymetricKey(self, key, iv, ct):
-        print "Decrypt using the shared key"
-        cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=default_backend())
-        decryptor = cipher.decryptor()
-        plain_text = decryptor.update(ct) + decryptor.finalize()
-        return plain_text
-
-
-    # generates and returns the private and public keys.
-    def generatePublicPrivateKeys(self):
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
-
-        public_key = private_key.public_key()
-        pem = private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption())
-        pem_public = public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
-
-        # Just writing them into files for now, we can decide where and how to store them, maybe just use variables?
-        with open("server_private_key.txt", "w") as f:
-            f.write(str(pem))
-
-        with open("server_public_key.txt", "w") as f:
-            f.write(str(pem_public))
-
-        # Making the function also return them in case we want to store in variables.
-        return pem, pem_public
 
 def main(argv):
     if len(argv) >= 1:

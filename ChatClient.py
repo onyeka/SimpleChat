@@ -4,6 +4,7 @@ import threading
 
 import CryptoLib
 import sys
+import genPrime
 
 
 class ChatClient(object):
@@ -15,9 +16,9 @@ class ChatClient(object):
     # Read parameters from config file
     config = SafeConfigParser()
     config.read('client.cfg')
-    salt = config.getint('SectionOne', 'Salt')
-    hKey = config.getint('SectionOne', 'HKey')
-    prime = config.getint('SectionOne', 'PM')
+    salt = config.get('SectionOne', 'Salt')
+    hKey = config.get('SectionOne', 'HKey')
+    #prime = config.getint('SectionOne', 'PM')
     MSG_LEN = config.getint('SectionOne', 'MsgLen')
     generator = config.getint('SectionOne', 'Generator')
 
@@ -27,24 +28,25 @@ class ChatClient(object):
         self.count = 3 # only 3 login attempts are allowed
         self.isAuthenticated = False
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.settimeout(5.0)
         self.peers = {}
 
-        self.serverPublicKey = CryptoLib.getServerPublicKey()
+        self.serverPublicKey = CryptoLib.getPublicKey('server_public_key.pem')
         if(self.serverPublicKey == -1):
             sys.exit(-1)
 
     def login(self):
-        while(self.count != 0):
+        while self.count != 0:
             self.count -= 1
-            self.username = input("Please enter your username: ")
+            self.username = raw_input("Please enter your username: ")
             print "username: ", self.username
-            password = input("Please enter your password: ")
-            print "password: ", password
-            pwdHash = CryptoLib.generateSaltedPasswordHash(ChatClient.hKey,
+            self.password = raw_input("Please enter your password: ")
+            print "password: ", self.password
+            self.pwdHash = CryptoLib.generateSaltedPasswordHash(ChatClient.hKey,
                                                            ChatClient.salt,
-                                                           password)
-            self.isAuthenticated = self.authenticateMe(pwdHash)
-            if(self.isAuthenticated == True):
+                                                           self.password)
+            self.isAuthenticated = self.authenticateMe(self.pwdHash)
+            if self.isAuthenticated is True:
                 print "===============================\n" \
                       " Welcome {}! Happy Chatting!!! \n".format(self.username), \
                       "===============================\n"
@@ -52,14 +54,19 @@ class ChatClient(object):
             else:
                 print " Error!! username or password is invalid, please try again\n"
 
-        if(self.count == 0):
+        if self.count == 0:
             print " Exceeded number of trials...Good bye!"
             sys.exit(-1)
         else:
             return self.isAuthenticated
 
     def receiveResponse(self):
-        data, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
+        data = None
+        addr = None
+        try:
+            data, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
+        except socket.timeout, e:
+            print "Error: ", e
         return data
 
     def sendMessage(self, msg, addr, port):
@@ -71,43 +78,100 @@ class ChatClient(object):
             print "send message failed: ", e
         return ret
 
+    # Challenge solving function
+    def solveChallenge(self, challenge, num):
+        print " challenge: %s, num: %s" % (challenge, num)
+
+        response = int(CryptoLib.generateKeyHash(str(num)), 16)
+        while response != challenge:
+            num += 1
+            response = int(CryptoLib.generateKeyHash(str(num)), 16)
+            #print " challenge: %x, hash: %x" % (challenge, response)
+
+        return num
+
     def authenticateMe(self, pwdHash):
         print "authenticate with chat server and set up session key"
         ret = False
-        if(self.serverPublicKey != None):
+        if self.serverPublicKey is not None:
             # step 1: send authentication message
-            msg = "authenticate:"
-            if(self.sendMessage(msg, self.serverAddr, self.port) == False):
+            msg = "AUTH:"
+            if not self.sendMessage(msg, self.serverAddr, self.port):
                 return ret
 
-            # step 2: receive challenge
-            challenge = self.receiveResponse()
+            # step 2: receive challenge and starting number
+            serverResponse = self.receiveResponse()
+            challengeAndStartingNum = serverResponse.split(":")
+            challenge = int(challengeAndStartingNum[0],16)
+            startingNum = int(challengeAndStartingNum[1])
 
-            # step 3: handle challenge and generate response as well as
-            # Diffie Hellman contribution
-            # TODO: handle challenge received and generate response
-            secretKey, clientContribution = \
-                CryptoLib.generateDHContribution(ChatClient.generator,
-                                                 ChatClient.prime)
+            # step 3: solve challenge and generate response to server
+            response = self.solveChallenge(challenge, startingNum)
+            msg = "SOLV:" + str(response) + ":" + self.username
+            print " Challenge was: %s, Number was: %s" % (challenge, response)
+            if self.sendMessage(msg, self.serverAddr, self.port) is False:
+                return ret
+
+            #**************************************************
+            # Start authentication procedure (Augmented PDM)
+            #**************************************************
+            a = CryptoLib.generateRandomKey(16)
+            # retrieve the safe prime for the user
+            p = genPrime.genp(self.username, self.password)
 
             # step 4: encrypt client contribution and send response
-            clientCipher = CryptoLib.encryptUsingPublicKey(self.serverPublicKey,
-                                                           clientContribution)
-            msg = "Response:todo:%s:%s" % (self.username, clientCipher)
-            if(self.sendMessage(msg, self.serverAddr, self.port) == False):
+            #clientCipher = CryptoLib.encryptUsingPublicKey(self.serverPublicKey,
+            #                                               clientContribution)
+            # msg = "Response:todo:%s:%s" % (self.username, clientCipher)
+            #if self.sendMessage(msg, self.serverAddr, self.port) is False:
+            #    return ret
+
+            # generate client contribution (2^a mod p) to send to server
+            clientContribution = pow(ChatClient.generator, a, p)
+            msg = CryptoLib.encryptUsingPublicKey(self.serverPublicKey,
+                                                  "CONT:" + str(clientContribution))
+            if not self.sendMessage(msg, self.serverAddr, self.port):
                 return ret
 
-            # step 5: receive server contribution and hash
-            serverContribution, secretKeyHash = self.receiveResponse()
+            # step 5: receive server contribution and shared key hash
+            serverResponse = self.receiveResponse()
+            serverContributionAndHash = serverResponse.split(":")
+            serverContribution = serverContributionAndHash[0]
+            serverSessionKeyHash = serverContributionAndHash[1]
 
-            # step 6: TODO: calculate session key and hash
-            sessionKey = CryptoLib.generateSecretKey(serverContribution, secretKey,
-                                                          ChatClient.prime)
-            if(secretKeyHash == CryptoLib.generateKeyHash(sessionKey)):
+            # step 6: calculate session key and hash
+            W = pwdHash
+            # 2^ab mod p
+            sharedKey1 = CryptoLib.generateSecretKey(serverContribution, a, p)
+            # 2^bW mod p
+            sharedKey2 = CryptoLib.generateSecretKey(serverContribution, W, p)
+            sessionKey = str(sharedKey1) + ":" + str(sharedKey2)
+            print "sharedKey1: %s, sharedKey2: %s, sessionKey: %s" % (sharedKey1,
+                                                                      sharedKey2, sessionKey)
+            # HASH(2^ab mod p, 2^bW modp)
+            sessionKeyHash = CryptoLib.generateKeyHash(sessionKey)
+            if(serverSessionKeyHash == sessionKeyHash):
                 self.sessionKey = sessionKey
                 self.sessionID = CryptoLib.generateRandomKey(16)
-                # step 7: send server client's public key
-                ret = True
+
+            # step 7: send hash of encrypted session key and public key to server
+                sessionKeyHashCipher = CryptoLib.encyptUsingSymmetricKey(
+                    self.sessionKey, self.sessionID, sessionKeyHash)
+                self.clientPrivateKey, self.clientPublicKey = CryptoLib.generatePublicPrivateKeys()
+
+                msg = "VALD:" + sessionKeyHashCipher + ":" + self.sessionID \
+                      + ":" + self.clientPublicKey
+
+                if not self.sendMessage(msg, self.serverAddr, self.port):
+                    return ret
+
+                # server signals that client has been fully authenticated
+                response = self.receiveMessage()
+                if response == "ACK:":
+                 ret = True
+
+            # End of authentication with server.
+
         return ret
 
     def peerConnection(self, peerUsername, msg):
@@ -116,7 +180,7 @@ class ChatClient(object):
         peerCipher = CryptoLib.encyptUsingSymmetricKey(self.sessionKey,
                                                    self.sessionID, peerUsername)
         msg = "connect:%s:%s" % self.sessionID, peerCipher
-        if(self.sendMessage(msg, self.serverAddr, self.port) == False):
+        if not self.sendMessage(msg, self.serverAddr, self.port):
                 return ret
         ticket = self.receiveResponse()
 
@@ -147,21 +211,21 @@ def main(argv):
         chatClient = ChatClient(ipAddr, port)
 
         # login
-        if(chatClient.login() == True):
-            #Not sure we need to use a thread
-            thread = threading.Thread(name='Messages', target=chatClient.receiveChatMessages)
+        if chatClient.login() is True:
+            # Not sure we need to use a thread
+            thread = threading.Thread(name='Messages', target=chatClient.receiveMessages)
             thread.start()
         # wait for user to give us input
         while True:
-            msg = input("Type your messages to the server: ")
+            msg = raw_input("Type your messages to the server: ")
             msgSplit = msg.split()
-            if(len(msgSplit) == 1):
-                if(msgSplit[0] == 'list'):
-                    chatClient.listOfClients()
-            elif(len(msgSplit) == 3):
-                if(msgSplit[0] == 'send'):
+            if len(msgSplit) == 1:
+                if msgSplit[0] == 'list':
+                    chatClient.ListOfClients()
+            elif len(msgSplit) == 3:
+                if msgSplit[0] == 'send':
                     ret = chatClient.peerConnection(msgSplit[1], msgSplit[2])
-                    if(ret == True):
+                    if ret is True:
                         print "connected to peer"
 
 if __name__ == "__main__":
