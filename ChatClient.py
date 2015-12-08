@@ -5,7 +5,8 @@ import threading
 import CryptoLib
 import sys
 import genPrime
-
+import os
+import random
 
 class ChatClient(object):
     """ Usage: prints out how to use the chat client
@@ -199,6 +200,65 @@ class ChatClient(object):
         self.send_message(msg,self.serverAddr, self.port)
         response = self.receive_response()
         print "list of clients: ", response
+
+    # Called when this client wants to talk to another client
+    def connect_to_client(self, username, key):
+        ret = False
+        # choose a random iv
+        iv = os.urandom(16)
+        # concat iv with connect to msg and the username of the user to be connected to
+        msg = "connect to:" + username
+        # encrypt msg with shared key of the server and send to server
+        msg = CryptoLib.encyptUsingSymmetricKey(key, iv, msg)
+        msg = iv + ":" + msg
+        if not self.send_message(msg, self.serverAddr, self.port):
+            return ret
+
+        # receive the combined ticket from the server and split it into two parts
+        combined_ticket = self.receive_response()
+        combined_ticket = CryptoLib.decryptUsingSymetricKey(key, iv, combined_ticket).split(":")
+        user_ticket = combined_ticket[0]
+        client_ticket = combined_ticket[1]
+
+        # Each ticket should contain the address, port and public key of the client concat using ,'s
+        user_ticket = user_ticket.split(",")
+        client_address = user_ticket[0]
+        client_port = user_ticket[1]
+        client_key = user_ticket[2]
+        msg = "connect_request:" + client_ticket
+
+        # Encrypt and send client its ticket
+        msg = CryptoLib.encryptUsingPublicKey(client_key, msg)
+        if not self.send_message(msg, client_address, client_port):
+            return ret
+
+        # Send and receive contribution for shared key
+        msg = random.randrange(1, 50)
+        if not self.send_message(msg, client_address, client_port):
+            return ret
+        client_contribution = self.receive_response()
+
+        # construct shared key
+        shared_key = pow(2, (msg * client_contribution)) % 254375279339
+
+        return shared_key
+
+    # Called when this client is requested by another client (msg[1] = "connect_request")
+    def client_connection_requested(self, username, key, ticket):
+        ret = False
+        ticket = ticket.split(",")
+        client_address = ticket[0]
+        client_port = ticket[1]
+        client_key = ticket[2]
+        client_contribution = self.receive_response()
+        msg = random.randrange(1, 50)
+        if not self.send_message(msg, client_address, client_port):
+            return ret
+
+        # construct shared key
+        shared_key = pow(2, (msg * client_contribution)) % 254375279339
+
+        return shared_key
 
 def main(argv):
     if (len(argv) != 4) or (argv[0] != "-sip" and argv[2] != "-sp"):
