@@ -27,6 +27,7 @@ def genp(username, password):
     for c in s:
         i = ord(c)
         sum += i
+    sum = pow(sum, 3)
     p = next_prime(sum)
     sp = p * 2 + 1
     return sp
