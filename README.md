@@ -8,8 +8,8 @@ chat server needs to be run to enable users connect to each other. Below are the
 passwords of the pre-configured users. Ability to add new users dynamically would be added
 later.
 
-UserNames: Samson13,        Tricia_S,   Marshal09
+UserNames: Samson13,        Tricia_S,    Marshal09
 
-Passwords: Bringston*13,    tricia,     BeNS0n*09
+Passwords: Bringston_13,    tricia,      BeNS0n_09
 
-SafePrimes: 3779,           2879,       2903
+SafePrimes: 13078406423,    5702413859,  6790581263
