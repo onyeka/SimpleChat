@@ -26,7 +26,7 @@ def getPublicKey(filePath):
         return -1
 
 def generateRandomKey(bits):
-    return int((os.urandom(bits)).encode('hex'), 16)
+    return os.urandom(bits)
 
 def generateDHContribution(g, p):
     """
@@ -64,8 +64,8 @@ def generateSaltedPasswordHash(hKey, salt, password):
     h = hmac.HMAC(hKey, hashes.SHA256(), backend=default_backend())
     h.update(salt + password)
     pwdHash = h.finalize()
-    print " password Hash: ", pwdHash
-    return pwdHash
+    print " password Hash: ", pwdHash.encode('hex')
+    return pwdHash.encode('hex')
 
 
 def generatePublicPrivateKeys():
