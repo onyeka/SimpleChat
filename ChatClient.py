@@ -161,19 +161,20 @@ class ChatClient(object):
                 print"====== sessionID : ", self.sessionID
 
             # step 7: send hash of encrypted session key and public key to server
-                sessionKeyHashCipher = CryptoLib.encyptUsingSymmetricKey(
-                    self.sessionKey, self.sessionID, sessionKeyHash)
                 self.clientPrivateKey, self.clientPublicKey = CryptoLib.generatePublicPrivateKeys()
+                validateServer = CryptoLib.generateRandomKey(16)
 
-                msg = "VALD:" + sessionKeyHashCipher + ":" + self.clientPublicKey
-                msg = CryptoLib.encyptUsingSymmetricKey
+                msg = "VALD:" + sessionKeyHash + ":" + self.clientPublicKey + ":" + validateServer
+                msg = CryptoLib.encyptUsingSymmetricKey(self.sessionKey, self.sessionID,
+                                                        msg)
                 if not self.send_message(msg, self.serverAddr, self.port):
                     return ret
 
                 # server signals that client has been fully authenticated
-                response = self.receive_message()
-                if response == "ACK:":
-                 ret = True
+                response = self.receive_response()
+                serverResponse = response.split(":")
+                if serverResponse[0] == "ACK" and serverResponse[1] == validateServer:
+                    ret = True
 
             # End of authentication with server.
 
