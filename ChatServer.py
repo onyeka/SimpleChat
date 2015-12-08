@@ -72,19 +72,22 @@ class ChatServer(object):
     def handleClientMessages(self, msg, knownClient, addr):
         print " message received: '%s'" % msg
         msgContents = msg.split(":")
+        response = None
 
         if msgContents[0] == "AUTH":
             self.challengeAnswer, challenge, firstFew = self.challengeResponse()
-            msg = str(challenge) + ":" + str(firstFew)
+            response = str(challenge) + ":" + str(firstFew)
             print "sending AUTH Ans: %d, challenge: %d, firstFew: %d, msg: %s" % \
                   (self.challengeAnswer, int(challenge, 16), firstFew, msg)
-            self.sendMessage(msg, addr)
+            self.sendMessage(response, addr)
+            return
         elif msgContents[0] == "SOLV":
             if int(msgContents[1]) == self.challengeAnswer:
                 print " solved!!!! %s, ans: %s, user: %s" % \
                       (msgContents[1], self.challengeAnswer, msgContents[2])
                 client = Client.User(msgContents[2], addr)
                 self.clients[addr] = client
+            return
         elif msgContents[0] == "CONT":
             clientContribution = msgContents[1]
             #**************************************************
@@ -94,28 +97,39 @@ class ChatServer(object):
             # retrieve the safe prime for the user
             primeTag = 'P' + (self.clients[addr]).getName()
             p = ChatServer.config.getint('SectionTwo', primeTag)
-            print "prime for client: %s ==> %s" % (primeTag, p)
+            if p is None: self.sendMessage(response, addr)
+
             # generate server contribution (2^b mod p) to send to server
-            serverContribution = pow(ChatServer.generator, b, p)
+            serverContribution = pow(ChatServer.generator, int(b.encode('hex'), 16), p)
 
             # retrieve the password hash for the user
             pwdHashTag = 'W' + (self.clients[addr]).getName()
+
             # 2^W mod p
-            pwdHash = ChatServer.config.getint('SectionTwo', pwdHashTag)
+            pwdHashExp = ChatServer.config.getint('SectionTwo', pwdHashTag)
+            print "2^W mod p for client: %s ==> %s" % (pwdHashTag, pwdHashExp)
 
             # 2^ab mod p
-            sharedKey1 = CryptoLib.generateSecretKey(clientContribution, b, p)
+            sharedKey1 = CryptoLib.generateSecretKey(int(clientContribution),
+                                                     int(b.encode('hex'), 16), p)
+
             # 2^bW mod p
-            sharedKey2 = CryptoLib.generateSecretKey(pwdHash, b, p)
-            sessionKey = str(sharedKey1) + ":" + str(sharedKey2)
+            sharedKey2 = CryptoLib.generateSecretKey(pwdHashExp, int(b.encode('hex'), 16), p)
+
+            sessionKey = (str(sharedKey1) + str(sharedKey2))[0:16]
             print "Server: sharedKey1: %s, sharedKey2: %s, sessionKey: %s" % (sharedKey1,
                                                                       sharedKey2, sessionKey)
             # HASH(2^ab mod p, 2^bW modp)
             sessionKeyHash = CryptoLib.generateKeyHash(sessionKey)
             if knownClient is not None:
                 knownClient.setSessionKeyAndHash(sessionKey, sessionKeyHash)
-                msg = serverContribution + ":" + sessionKeyHash
-                self.sendMessage(msg, addr)
+                knownClient.setInitializationVector(CryptoLib.generateRandomKey(16))
+                print " serverContribution: %s, sessionKeyHash: %s, IV: %s" % \
+                      (serverContribution,sessionKeyHash, knownClient.getInitializationVector())
+                response = str(serverContribution) + ":" + sessionKeyHash + ":" \
+                           + knownClient.getInitializationVector()
+                self.sendMessage(response, addr)
+                return
             else:
                 print "Server: unknown client!!!"
         else:
@@ -130,7 +144,7 @@ class ChatServer(object):
             if(client == None):
                 print "couldn't retrieve client"
                 return
-            if client.getSessionKey() is None:
+            if client.getSessionKey() or client.getInitializationVector() is None:
                 decrypted_msg = CryptoLib.decryptUsingPrivateKey(self.private_key, msg)
             else:
                 decrypted_msg = self.decryptUsingSymetricKey(client.getSessionKey(),
@@ -163,7 +177,11 @@ def main(argv):
         chatServer = ChatServer()
         if(chatServer != None):
             while True:
-                chatServer.receiveClientMessages()
+                try:
+                    chatServer.receiveClientMessages()
+                except (KeyboardInterrupt, SystemExit):
+                    print "Got keyboard or system exit interrupt"
+                    break
 
 if __name__ == "__main__":
     main(sys.argv[1:])
