@@ -115,6 +115,7 @@ def encyptUsingSymmetricKey(key, iv, data):
     """
     Encrypt message using symmetric key
     :param key: symmetric key
+    :param iv: initialization vector
     :param data: data to encrypt
     :return: cipher text
     """
@@ -147,5 +148,17 @@ def decryptUsingPrivateKey(key, cipher):
     return data
 
 
-def decryptUsingSymetricKey(key):
-    print "Decrypt using the shared key"
+def decryptUsingSymetricKey(key, iv, data):
+    """
+    Decrypt message using symmetric key
+    :param key: symmetric key
+    :param iv: initialization vector
+    :param data: data to decrypt
+    :return: cipher text
+    """
+    print "Use shared key to decrypt data"
+    backend = default_backend()
+    cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=backend)
+    decryptor = cipher.decryptor()
+    ct = decryptor.update(data) + decryptor.finalize()
+    return ct
