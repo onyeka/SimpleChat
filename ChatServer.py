@@ -144,10 +144,12 @@ class ChatServer(object):
             if(client == None):
                 print "couldn't retrieve client"
                 return
-            if client.getSessionKey() or client.getInitializationVector() is None:
+            if client.getSessionKey() is None or client.getInitializationVector() is None:
+                #print "!!!!!! session key: %s, IV: %s" % (client.getSessionKey(),
+                #client.getInitializationVector())
                 decrypted_msg = CryptoLib.decryptUsingPrivateKey(self.private_key, msg)
             else:
-                decrypted_msg = self.decryptUsingSymetricKey(client.getSessionKey(),
+                decrypted_msg = CryptoLib.decryptUsingSymetricKey(client.getSessionKey(),
                                                              client.getInitializationVector(),
                                                              msg)
 
