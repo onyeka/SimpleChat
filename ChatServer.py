@@ -158,17 +158,28 @@ class ChatServer(object):
             print "it's a potential client!!"
             self.handleClientMessages(msg, None, addr)
 
-    def encyptUsingSymetricKey(self, key, iv, data):
-        print "Using shared key to encrypt data"
-        backend = default_backend()
-        cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=backend)
-        encryptor = cipher.encryptor()
-        ct = encryptor.update(data) + encryptor.finalize()
-        return ct
+    # def encyptUsingSymetricKey(self, key, iv, data):
+    #     print "Using shared key to encrypt data"
+    #     backend = default_backend()
+    #     cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=backend)
+    #     encryptor = cipher.encryptor()
+    #     ct = encryptor.update(data) + encryptor.finalize()
+    #     return ct
 
+    # def createToken(self, client1, client2):
+    #     print "Create token for the clients to talk to each other"
 
-    def createToken(self, client1, client2):
-        print "Create token for the clients to talk to each other"
+    # Should create 2 tokens, joined by ":" and encrypted with the shared key of the user requesting
+    # the communication and send it to the user. The tokens contain 3 parts, the user address, the
+    # user port and the public key of the user.
+    def create_token(self, user1_address, user2_address, user1_key, user2_key, key):
+        token1 = user1_address + ":" + user1_key
+        token2 = user2_address + ":" + user2_key
+        token = token1 + "," + token2
+        # TODO: server needs to store the client information into the clients dictionary (maybe key on username?)
+        token = CryptoLib.encyptUsingSymmetricKey(key, self.clients[user1_address].sessionkey, token)
+        self.sendMessage(token, user1_address)
+
 
 def main(argv):
     if len(argv) >= 1:
