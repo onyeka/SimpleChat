@@ -149,6 +149,11 @@ class ChatServer(object):
                 msg = "unknown client requested"
                 msg = CryptoLib.encyptUsingSymmetricKey(client1_shared_key, knownClient.getInitializationVector(), msg)
                 self.sendMessage(msg, client1_address)
+        elif msgContents[0] == "VALD":
+            if knownClient is not None and knownClient.getSessionKeyHash() == msgContents[1]:
+                knownClient.setPublicKey(msgContents[2])
+                response = "ACK:" + msgContents[3]
+                self.sendMessage(response, addr)
         else:
             print "Server: unknown message: ", msg
 

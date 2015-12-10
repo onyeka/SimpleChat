@@ -12,6 +12,7 @@ class ChatClient(object):
     """
     USAGE = 'usage: \tpython ChatClient.py -sip <server ip> -sp <server port>'
     '\t-h: prints this help message and exit'
+    DBG = False
 
     # Read parameters from config file
     config = SafeConfigParser()
@@ -40,12 +41,12 @@ class ChatClient(object):
         while self.count != 0:
             self.count -= 1
             self.username = raw_input("Please enter your username: ")
-            print "username: ", self.username
             self.password = raw_input("Please enter your password: ")
             self.pwdHash = CryptoLib.generateSaltedPasswordHash(ChatClient.hKey,
                                                            ChatClient.salt,
                                                            self.password)
-            print "password: %s, pwdHash: %s " % (self.password, self.pwdHash)
+            if ChatClient.DBG is True:
+                print "password: %s, pwdHash: %s " % (self.password, self.pwdHash)
             self.isAuthenticated = self.authenticate_me(self.pwdHash)
             if self.isAuthenticated is True:
                 print "===============================\n" \
@@ -62,8 +63,10 @@ class ChatClient(object):
             return self.isAuthenticated
 
     def receive_response(self):
-        data = None
-        addr = None
+        """
+        Reads messages from socket
+        :return: data read
+        """
         try:
             data, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
         except socket.timeout, e:
@@ -71,6 +74,13 @@ class ChatClient(object):
         return data
 
     def send_message(self, msg, addr, port):
+        """
+        Sends message through socket
+        :param msg: message to be sent
+        :param addr: address of receiver
+        :param port: port of receiver
+        :return: True/False
+        """
         ret = False
         try:
             self.sock.sendto(msg, (addr, port))
@@ -81,6 +91,12 @@ class ChatClient(object):
 
     # Challenge solving function
     def solve_challenge(self, challenge, num):
+        """
+        Solve challenge set by server
+        :param challenge: server challenge
+        :param num: starting value
+        :return: number
+        """
         print " challenge: %s, num: %s" % (challenge, num)
 
         response = int(CryptoLib.generateKeyHash(str(num)), 16)
@@ -191,7 +207,7 @@ class ChatClient(object):
     #             return ret
     #     ticket = self.receive_response()
 
-    def receive_chat_messages(self):
+    def receive_peer_messages(self):
         print "receive messages..."
 
     def list_of_clients(self):
@@ -341,32 +357,32 @@ def main(argv):
             sys.exit(-1)
 
         # create the client, login and spawn a thread to
-        # receive data continuously from the server/clients
+        # receive data continuously from the clients
         chatClient = ChatClient(ipAddr, port)
 
         try:
             # login
             if chatClient.login() is True:
                 # Not sure we need to use a thread
-                thread = threading.Thread(name='Messages', target=chatClient.receive_messages)
+                thread = threading.Thread(name='Messages', target=chatClient.receive_peer_messages)
                 thread.start()
 
             # wait for user to give us input
-            while True:
-                try:
-                    msg = raw_input("Type your messages to the server: ")
-                    msgSplit = msg.split()
-                    if len(msgSplit) == 1:
-                        if msgSplit[0] == 'list':
-                            chatClient.list_of_clients()
-                    elif len(msgSplit) == 3:
-                        if msgSplit[0] == 'send':
-                            ret = chatClient.peer_connection(msgSplit[1], msgSplit[2])
-                            if ret is True:
-                                print "connected to peer"
-                except (KeyboardInterrupt, SystemExit):
-                    print "Got keyboard or system exit interrupt"
-                    break
+                while True:
+                    try:
+                        msg = raw_input("Type Your Messages: ")
+                        msgSplit = msg.split()
+                        if len(msgSplit) == 1:
+                            if msgSplit[0] == 'list':
+                                chatClient.list_of_clients()
+                        elif len(msgSplit) == 3:
+                            if msgSplit[0] == 'send':
+                                ret = chatClient.peer_connection(msgSplit[1], msgSplit[2])
+                                if ret is True:
+                                    print "connected to peer"
+                    except (KeyboardInterrupt, SystemExit):
+                        print "Got keyboard or system exit interrupt"
+                        break
         except (KeyboardInterrupt, SystemExit):
             print "Got keyboard or system exit interrupt"
             return
