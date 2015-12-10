@@ -132,6 +132,23 @@ class ChatServer(object):
                 return
             else:
                 print "Server: unknown client!!!"
+        elif msgContents[0] == "CONP":
+            peer_to_connect = msgContents[1]
+            client1_address = knownClient.getAddress()
+            client1_key = knownClient.getPublicKey()
+            client2_address = None
+            client2_key = None
+            client1_shared_key = knownClient.getSessionKey()
+            for address in self.clients:
+                if self.clients[address].getName() == peer_to_connect:
+                    client2_address = address
+                    client2_key = self.clients[address].getPublicKey()
+            if client2_address is not None:
+                self.create_token(client1_address,client2_address,client1_key,client2_key, client1_shared_key)
+            else:
+                msg = "unknown client requested"
+                msg = CryptoLib.encyptUsingSymmetricKey(client1_shared_key, knownClient.getInitializationVector(), msg)
+                self.sendMessage(msg, client1_address)
         else:
             print "Server: unknown message: ", msg
 
@@ -177,7 +194,7 @@ class ChatServer(object):
         token2 = user2_address + ":" + user2_key
         token = token1 + "," + token2
         # TODO: server needs to store the client information into the clients dictionary (maybe key on username?)
-        token = CryptoLib.encyptUsingSymmetricKey(key, self.clients[user1_address].sessionkey, token)
+        token = CryptoLib.encyptUsingSymmetricKey(key, self.clients[user1_address].getInitializationVector(), token)
         self.sendMessage(token, user1_address)
 
 

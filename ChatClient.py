@@ -216,7 +216,11 @@ class ChatClient(object):
 
         # Step 2: receive the combined ticket from the server and split it into two parts
         combined_ticket = self.receive_response()
-        combined_ticket = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, combined_ticket).split(",")
+        combined_ticket = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, combined_ticket)
+        if combined_ticket == "unknown client requested":
+            print combined_ticket
+            return False
+        combined_ticket = combined_ticket.split(",")
         user_ticket = combined_ticket[0]
         peer_ticket = combined_ticket[1]
 
