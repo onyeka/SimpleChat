@@ -263,11 +263,14 @@ class ChatClient(object):
 
     # Called when this client wants to talk to another client
     def authenticate_peer(self, username):
+        for address in self.peers:
+            if self.peers[address].get_username() == username:
+                self.peers[address].free()
         ret = False
         # choose a random iv
 
         # send server the username of the client we want to chat with
-        msg = "CONP:" + username
+        msg = "CONNECTPEER:" + username
 
         # step 1: Request Server for the tickets
         msg = CryptoLib.encyptUsingSymmetricKey(self.sessionKey, self.sessionID, msg)
@@ -276,40 +279,30 @@ class ChatClient(object):
 
         # Step 2: receive the combined ticket from the server and split it into two parts
         combined_ticket = self.receive_response()
+        print "got combined ticket", combined_ticket
+
         combined_ticket = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, combined_ticket)
-        if combined_ticket == "unknown client requested":
-            print combined_ticket
-            return False
-        combined_ticket = combined_ticket.split(",")
-        if combined_ticket is None:
-            print "Error!!! Didn't receive ticket from server"
-            return ret
+        print "\n decrypted combined ticket", combined_ticket
+        combined_ticket = combined_ticket.split(":")
+        peer_key = combined_ticket[0]
+        peer_iv = combined_ticket[1]
+        peer_address = combined_ticket[2]
+        peer_port = int(combined_ticket[3])
+        peer_ticket = combined_ticket[4]
 
-        combined_ticket = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID,
-                                                            combined_ticket).split(",")
-        user_ticket = combined_ticket[0]
-        peer_ticket = combined_ticket[1]
-
-        # decrypt the token for this client and unpack it.
-        # Each ticket should contain the address, port and public key of the client concat using ,'s
-        user_ticket = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, user_ticket)
-        user_ticket = user_ticket.split(":")
-        peer_address = user_ticket[0]
-        peer_tmp_shared_key = user_ticket[1]
-        if user_ticket[2] != username:
-            print "Error!!! wrong peer received!!!"
-            return ret
-
-        peer_tmp_iv = user_ticket[3]
+        print "=========== got all parts requesting client connection"
 
         # create peer object
         peer = Peer.Peer(username, peer_address)
 
         # Step 3: message to talk to peer encrypted with key given by the server
         # message to peer contains peer's ticket
-        msg = "REQUEST_PEER_CONNECTION:" + self.username + ":" + peer_ticket
-        msg = CryptoLib.encyptUsingSymmetricKey(peer_tmp_shared_key, peer_tmp_iv, msg)
-        if not self.send_message(msg, peer_address[0], peer_address[1]):
+        msg = "REQUEST_PEER_CONNECTION:" + str(self.username) + ":" + str(peer_ticket)
+        print "==========msg to be encrypted:", msg
+        print "===========length of iv:", len(peer_iv)
+        print "===========length of key:", len(peer_key)
+        msg = CryptoLib.encyptUsingSymmetricKey(peer_key, peer_iv, msg)
+        if not self.send_message(msg, peer_address, peer_port):
             return ret
 
         # Step 4: Receive peer's contribution for DH key
@@ -317,15 +310,15 @@ class ChatClient(object):
         if response is None:
             print "Error!!! Didn't receive contribution from peer: ", username
             return ret
-        peer_contribution = CryptoLib.decryptUsingSymetricKey(peer_tmp_shared_key, peer_tmp_iv, response)
+        peer_contribution = CryptoLib.decryptUsingPrivateKey(self.clientPrivateKey, response)
 
         # Step 5: Generate and send contribution for DH key as well as the initialization vector
         a = CryptoLib.generateRandomKey(32)
         peer_session_id = CryptoLib.generateRandomKey(16)
         client_contribution = pow(self.peerGenerator, a, self.peerPrime)
         msg = "PEER_CONTRIBUTION:" + str(client_contribution) + ":" + peer_session_id
-        msg = CryptoLib.encyptUsingSymmetricKey(peer_tmp_shared_key, peer_tmp_iv, msg)
-        if not self.send_message(msg, peer_address[0], peer_address[1]):
+        msg = CryptoLib.encyptUsingSymmetricKey(peer_key, peer_iv, msg)
+        if not self.send_message(msg, peer_address, peer_port):
             return ret
 
         # Now construct the shared key and set iv and shared key to peer object
@@ -341,16 +334,16 @@ class ChatClient(object):
         challenge = int(CryptoLib.decryptUsingSymetricKey(shared_key, peer_session_id, challenge))
         challenge += 1
 
-        msg = "PEER_CHALLENGE:" + challenge
+        msg = "PEER_CHALLENGE:" + str(challenge)
         msg = CryptoLib.encyptUsingSymmetricKey(shared_key, peer_session_id, msg)
-        if not self.send_message(msg, peer_address[0], peer_address[1]):
+        if not self.send_message(msg, peer_address, peer_port):
             return ret
 
         response = self.receive_response()
         if response is None:
             print "Error!!! Didn't receive response from peer"
             return ret
-        response = CryptoLib.decryptUsingSymetricKey(shared_key, peer_session_id, response)
+        response = int(CryptoLib.decryptUsingSymetricKey(shared_key, peer_session_id, response))
 
         # If authentication is successful, add the peer to list of connected peers
         if response == challenge + 1:
@@ -488,9 +481,11 @@ def main(argv):
                                         chatClient.disconnectClient()
                                 elif len(msgSplit) == 3:
                                     if msgSplit[0] == 'send':
-                                        ret = chatClient.peer_connection(msgSplit[1], msgSplit[2])
+                                        ret = chatClient.authenticate_peer(msgSplit[1])
                                         if ret is True:
                                             print "connected to peer"
+
+
                     except (KeyboardInterrupt, SystemExit):
                         print "Got keyboard or system exit interrupt"
                         chatClient.disconnectClient()

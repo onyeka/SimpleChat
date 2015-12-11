@@ -220,12 +220,21 @@ class ChatServer(object):
     # Should create 2 tokens, joined by ":" and encrypted with the shared key of the user requesting
     # the communication and send it to the user. The tokens contain 3 parts, the user address, the
     # user port and the public key of the user.
-    def create_token(self, user1_address, user2_address, user1_key, user2_key, key):
-        token1 = user1_address + ":" + user1_key
-        token2 = user2_address + ":" + user2_key
-        token = token1 + "," + token2
-        # TODO: server needs to store the client information into the clients dictionary (maybe key on username?)
-        token = CryptoLib.encyptUsingSymmetricKey(key, self.clients[user1_address].getInitializationVector(), token)
+    def create_token(self, user1_address, user2_address, key):
+        peer1_address = user1_address[0]
+        peer1_port = user1_address[1]
+        peer2_address = user2_address[0]
+        peer2_port = user2_address[1]
+        peer2_shared_key = self.clients[user2_address].get_session_key()
+        peer1_iv = self.clients[user1_address].get_initialization_vector()
+        peer2_iv = self.clients[user2_address].get_initialization_vector()
+        shared_key = os.urandom(16).encode("hex")
+        shared_iv = os.urandom(8).encode("hex")
+        token_1 = str(shared_key) + ":" + str(shared_iv) + ":" + str(peer2_address) + ":" + str(peer2_port)
+        token_2 = str(shared_key) + ":" + str(shared_iv) + ":" + str(peer1_address) + ":" + str(peer1_port)
+        token_2 = CryptoLib.encyptUsingSymmetricKey(peer2_shared_key, peer2_iv, token_2)
+        token = token_1 + ":" + token_2
+        token = CryptoLib.encyptUsingSymmetricKey(key, peer1_iv, token)
         self.sendMessage(token, user1_address)
 
 
