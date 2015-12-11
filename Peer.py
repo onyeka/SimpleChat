@@ -3,9 +3,8 @@ class Peer(object):
         self.peername = name
         self.authenticated = False
         self.address = address
-        #self.shared_key = None
         self.iv = iv
-        self.shared_key = key
+        self.peer_session_key = key
         self.b = None
 
     def get_address(self):
@@ -26,8 +25,8 @@ class Peer(object):
     #def get_public_key(self):
         #return self.public_key
 
-    def get_shared_key(self):
-        return self.shared_key
+    def get_peer_session_key(self):
+        return self.peer_session_key
 
     #def set_public_key(self, public_key):
         #self.public_key = public_key
@@ -38,8 +37,8 @@ class Peer(object):
     def set_client_b(self, key):
         self.b = key
 
-    def set_shared_key(self, shared_key):
-        self.shared_key = shared_key
+    def set_peer_session_key(self, key):
+        self.peer_session_key = key
 
     def set_initialization_vector(self, iv):
         self.iv = iv
