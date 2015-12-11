@@ -162,3 +162,21 @@ def decryptUsingSymetricKey(key, iv, data):
     decryptor = cipher.decryptor()
     ct = decryptor.update(data) + decryptor.finalize()
     return ct
+
+def signEncryptedMsg(key, cipher):
+    signer = key.signer(padding.PSS(mgf=padding.MGF1(hashes.SHA1()),
+                                    salt_length=padding.PSS.MAX_LENGTH),
+                                    hashes.SHA1())
+    signer.update(cipher)
+    signature = signer.finalize()
+    return signature
+
+def verifyMessage(signature, cipher, pubkey):
+    verifier = pubkey.verifier(
+        signature,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA1()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ), hashes.SHA1())
+    verifier.update(cipher)
+    return verifier.verify()
