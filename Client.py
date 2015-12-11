@@ -14,6 +14,9 @@ class User(object):
     def get_address(self):
         return self.address
 
+    def is_authenticated(self):
+        return self.authenticated
+
     def get_initialization_vector(self):
         return self.iv
 
@@ -28,6 +31,9 @@ class User(object):
 
     def get_session_key_hash(self):
         return self.sessionKeyHash
+
+    def set_authenticated(self, auth):
+        self.authenticated = auth
 
     def set_public_key(self, publicKey):
         self.publicKey = publicKey
