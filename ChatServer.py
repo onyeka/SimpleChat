@@ -77,14 +77,14 @@ class ChatServer(object):
         if msgContents[0] == "AUTH":
             self.challengeAnswer, challenge, firstFew = self.challengeResponse()
             response = str(challenge) + ":" + str(firstFew)
-            print "sending AUTH Ans: %d, challenge: %d, firstFew: %d, msg: %s" % \
-                  (self.challengeAnswer, int(challenge, 16), firstFew, msg)
+            #print "sending AUTH Ans: %d, challenge: %d, firstFew: %d, msg: %s" % \
+                  #(self.challengeAnswer, int(challenge, 16), firstFew, msg)
             self.sendMessage(response, addr)
             return
         elif msgContents[0] == "SOLV":
             if int(msgContents[1]) == self.challengeAnswer:
-                print " solved!!!! %s, ans: %s, user: %s" % \
-                      (msgContents[1], self.challengeAnswer, msgContents[2])
+                #print " solved!!!! %s, ans: %s, user: %s" % \
+                      #(msgContents[1], self.challengeAnswer, msgContents[2])
                 client = Client.User(msgContents[2], addr)
                 self.clients[addr] = client
             return
@@ -95,7 +95,7 @@ class ChatServer(object):
             #**************************************************
             b = CryptoLib.generateRandomKey(16)
             # retrieve the safe prime for the user
-            primeTag = 'P' + (self.clients[addr]).getName()
+            primeTag = 'P' + (self.clients[addr]).get_name()
             p = ChatServer.config.getint('SectionTwo', primeTag)
             if p is None: self.sendMessage(response, addr)
 
@@ -103,7 +103,7 @@ class ChatServer(object):
             serverContribution = pow(ChatServer.generator, int(b.encode('hex'), 16), p)
 
             # retrieve the password hash for the user
-            pwdHashTag = 'W' + (self.clients[addr]).getName()
+            pwdHashTag = 'W' + (self.clients[addr]).get_name()
 
             # 2^W mod p
             pwdHashExp = ChatServer.config.getint('SectionTwo', pwdHashTag)
@@ -122,12 +122,13 @@ class ChatServer(object):
             # HASH(2^ab mod p, 2^bW modp)
             sessionKeyHash = CryptoLib.generateKeyHash(sessionKey)
             if knownClient is not None:
-                knownClient.setSessionKeyAndHash(sessionKey, sessionKeyHash)
-                knownClient.setInitializationVector(CryptoLib.generateRandomKey(16))
-                print " serverContribution: %s, sessionKeyHash: %s, IV: %s" % \
-                      (serverContribution,sessionKeyHash, knownClient.getInitializationVector())
+                knownClient.set_session_key_and_hash(sessionKey, sessionKeyHash)
+                iv = CryptoLib.generateRandomKey(16)
+                knownClient.set_initialization_vector(iv)
+                #print " serverContribution: %s, sessionKeyHash: %s, IV: %s" % \
+                      #(serverContribution, sessionKeyHash, knownClient.get_initialization_vector())
                 response = str(serverContribution) + ":" + sessionKeyHash + ":" \
-                           + knownClient.getInitializationVector()
+                           + knownClient.get_initialization_vector()
                 self.sendMessage(response, addr)
                 return
             else:
@@ -154,6 +155,26 @@ class ChatServer(object):
                 knownClient.setPublicKey(msgContents[2])
                 response = "ACK:" + msgContents[3]
                 self.sendMessage(response, addr)
+=======
+        elif msgContents[0] == "VALIDATE":
+            if knownClient is not None and knownClient.get_session_key_hash() == msgContents[1]:
+                #knownClient.setPublicKey(msgContents[2])
+                msgContents[2] = int(msgContents[2]) +1
+                response = "ACKNOWLEDGE:" + str(msgContents[2])
+                response = CryptoLib.encyptUsingSymmetricKey(knownClient.get_session_key(),
+                                                             knownClient.get_initialization_vector(),
+                                                             response)
+                self.sendMessage(response, knownClient.get_address())
+        elif msgContents[0] == "list":
+            if knownClient is not None and knownClient.get_session_key() is not None:
+                response = ""
+                for client in self.clients.values():
+                    response = response + client.get_name() + ","
+                print " list of clients: ", response
+                response = CryptoLib.encyptUsingSymmetricKey(knownClient.get_session_key(),
+                                                             knownClient.get_initialization_vector(),
+                                                             response)
+                self.sendMessage(response, knownClient.get_address())
         else:
             print "Server: unknown message: ", msg
 
@@ -166,18 +187,18 @@ class ChatServer(object):
             if(client == None):
                 print "couldn't retrieve client"
                 return
-            if client.getSessionKey() is None or client.getInitializationVector() is None:
+            if client.get_session_key() is None or client.get_initialization_vector() is None:
                 #print "!!!!!! session key: %s, IV: %s" % (client.getSessionKey(),
                 #client.getInitializationVector())
                 decrypted_msg = CryptoLib.decryptUsingPrivateKey(self.private_key, msg)
             else:
-                decrypted_msg = CryptoLib.decryptUsingSymetricKey(client.getSessionKey(),
-                                                             client.getInitializationVector(),
+                decrypted_msg = CryptoLib.decryptUsingSymetricKey(client.get_session_key(),
+                                                             client.get_initialization_vector(),
                                                              msg)
 
             self.handleClientMessages(decrypted_msg, client, addr)
         else:
-            print "it's a potential client!!"
+            #print "it's a potential client!!"
             self.handleClientMessages(msg, None, addr)
 
     # def encyptUsingSymetricKey(self, key, iv, data):
