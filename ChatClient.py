@@ -1,6 +1,7 @@
 from ConfigParser import SafeConfigParser
 import socket
 import threading
+import select
 
 import CryptoLib
 import sys
@@ -27,19 +28,27 @@ class ChatClient(object):
     peerPrime = config.getint('SectionOne', 'PeerPrime')
     peerGenerator = config.getint('SectionOne', 'PeerGenerator')
 
-    def __init__(self, ipAddr, port, l):
+    def __init__(self, ipAddr, port):
         self.serverAddr = ipAddr
         self.port = port
         self.count = 3 # only 3 login attempts are allowed
         self.isAuthenticated = False
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.settimeout(5.0)
+        self.sock.settimeout(3.0)
         self.peers = {}
-        self.lock = l
+        self.DBG = False
 
         self.serverPublicKey = CryptoLib.getPublicKey('server_public_key.pem')
         if(self.serverPublicKey == -1):
             sys.exit(-1)
+
+    def getSocket(self):
+        return self.sock
+
+    def disconnectClient(self):
+        if self.isAuthenticated == True:
+            msg = "DISCONNECTING:"
+            self.send_encrypted_message(msg)
 
     def login(self):
         while self.count != 0:
@@ -71,19 +80,33 @@ class ChatClient(object):
         Reads messages from socket
         :return: data read
         """
+        data = None
+        address = None
         try:
-            data = None
-            addr = None
+
             #print "===== receive_response: LOCKING ====="
-            #self.lock.acquire()
-            data, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
+            data, address = self.sock.recvfrom(ChatClient.MSG_LEN)
         except socket.timeout, e:
             #print "Main Thread Error: ", e
-            addr = None
+            address = None
         #finally:
             #print "===== receive_response: RELEASING ====="
-            #self.lock.release()
         return data
+
+    def send_encrypted_message(self, msg):
+        """
+        Sends encrypted message through socket
+        :param msg: message to be sent
+        :return: True/False
+        """
+        ret = False
+        try:
+            msg = CryptoLib.encyptUsingSymmetricKey(self.sessionKey, self.sessionID, msg)
+            self.sock.sendto(msg, (self.serverAddr, self.port))
+            ret = True
+        except Exception, e:
+            print "send message failed: ", e
+        return ret
 
     def send_message(self, msg, addr, port):
         """
@@ -109,7 +132,8 @@ class ChatClient(object):
         :param num: starting value
         :return: number
         """
-        print " challenge: %s, num: %s" % (challenge, num)
+        if self.DBG:
+            print " challenge: %s, num: %s" % (challenge, num)
 
         response = int(CryptoLib.generateKeyHash(str(num)), 16)
         while response != challenge:
@@ -135,37 +159,31 @@ class ChatClient(object):
             challenge = int(challengeAndStartingNum[0],16)
             startingNum = int(challengeAndStartingNum[1])
 
-            # step 3: solve challenge and generate response to server
-            response = self.solve_challenge(challenge, startingNum)
-            msg = "SOLV:" + str(response) + ":" + self.username
-            #print " Challenge was: %s, Number was: %s" % (challenge, response)
-            if self.send_message(msg, self.serverAddr, self.port) is False:
-                return ret
-
             #**************************************************
             # Start authentication procedure (Augmented PDM)
             #**************************************************
+            # step 3: solve challenge and send APDM contribution
+            challenge_response = self.solve_challenge(challenge, startingNum)
+
             a = CryptoLib.generateRandomKey(16)
             # retrieve the safe prime for the user
             p = genPrime.genp(self.username, self.password)
 
-            # step 4: encrypt client contribution and send response
-            #clientCipher = CryptoLib.encryptUsingPublicKey(self.serverPublicKey,
-            #                                               clientContribution)
-            # msg = "Response:todo:%s:%s" % (self.username, clientCipher)
-            #if self.send_message(msg, self.serverAddr, self.port) is False:
-            #    return ret
-
-            # generate client contribution (2^a mod p) to send to server
-            clientContribution = pow(ChatClient.generator, int(a.encode('hex'), 16), p)
-            msg = CryptoLib.encryptUsingPublicKey(self.serverPublicKey,
-                                                  "CONT:" + str(clientContribution))
+            # step 4: generate client contribution (2^a mod p) and send challenge response,
+            # client user name and contribution to server Note: no need to encrypt because eavesdropper
+            # cannot compute 2^W mod p
+            client_contribution = pow(ChatClient.generator, int(a.encode('hex'), 16), p)
+            msg = "CONTRIBUTION:" + str(challenge_response) + ":" + self.username + ":" + str(client_contribution)
+            #msg = CryptoLib.encryptUsingPublicKey(self.serverPublicKey, msg)
             if not self.send_message(msg, self.serverAddr, self.port):
                 return ret
 
             # step 5: receive server contribution and shared key hash
             serverResponse = self.receive_response()
-            if(serverResponse is None): return ret
+            if(serverResponse is None):
+                print "failed to receive response from server"
+                return ret
+
             serverContributionAndHash = serverResponse.split(":")
             serverContribution = serverContributionAndHash[0]
             serverSessionKeyHash = serverContributionAndHash[1]
@@ -179,22 +197,25 @@ class ChatClient(object):
             sharedKey2 = CryptoLib.generateSecretKey(int(serverContribution), int(W, 16), p)
             #print "===== W: ", W
             sessionKey = (str(sharedKey1) + str(sharedKey2))[0:16]
-            #print "sharedKey1: %s, sharedKey2: %s, sessionKey: %s, len: %d" % \
-                  #(sharedKey1, sharedKey2, sessionKey, len(sessionKey))
+            if self.DBG:
+                print "sharedKey1: %s, sharedKey2: %s, sessionKey: %s, len: %d" % \
+                  (sharedKey1, sharedKey2, sessionKey, len(sessionKey))
 
             # HASH(2^ab mod p, 2^bW modp)
             sessionKeyHash = CryptoLib.generateKeyHash(sessionKey)
             if(serverSessionKeyHash == sessionKeyHash):
                 self.sessionKey = sessionKey
                 self.sessionID = serverContributionAndHash[2]
-                print"====== session keys match!! sessionID : ", self.sessionID
+                if self.DBG:
+                    print"====== session keys match!! sessionID %s, len: %d " % \
+                     (self.sessionID, len(self.sessionID))
 
             # step 7: send hash of encrypted session key and public key to server
                 self.clientPrivateKey, self.clientPublicKey = CryptoLib.generatePublicPrivateKeys()
                 validateServer = int(CryptoLib.generateRandomKey(16).encode("hex"), 16)
 
                 #msg = "VALIDATE:" + sessionKeyHash + ":" + self.clientPublicKey + ":" + validateServer
-                msg = "VALIDATE:" + sessionKeyHash + ":" + str(validateServer)
+                msg = "VALIDATE:" + sessionKeyHash + ":" + str(validateServer) + ":" + self.clientPublicKey
 
                 msg = CryptoLib.encyptUsingSymmetricKey(self.sessionKey, self.sessionID,
                                                         msg)
@@ -208,7 +229,8 @@ class ChatClient(object):
                     return ret
                 response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, response)
                 response = response.split(":")
-                print "validateServer: %s, serverResponse: %s" % (str(validateServer),
+                if self.DBG is True:
+                    print "validateServer: %s, serverResponse: %s" % (str(validateServer),
                                                                   response[1])
                 if response[0] == "ACKNOWLEDGE" and \
                     int(validateServer + 1 == int(response[1])):
@@ -233,8 +255,10 @@ class ChatClient(object):
         msg = "list:"
         msg = CryptoLib.encyptUsingSymmetricKey(self.sessionKey, self.sessionID, msg)
         self.send_message(msg,self.serverAddr, self.port)
+        print
         response = self.receive_response()
-        response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, response)
+        if response is not None:
+            response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, response)
         print "list of clients: ", response
 
     # Called when this client wants to talk to another client
@@ -343,39 +367,37 @@ class ChatClient(object):
         Reads messages from socket
         :return: data read
         """
-        while True:
-            try:
-                #print "===== receive_peer_messages: LOCKING ====="
-                msg, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
-                if self.peers.has_key(addr):
-                    peer = self.peers.get(addr)
-                    response = CryptoLib.decryptUsingSymetricKey(peer.get_shared_key(),
-                                                                 peer.get_initialization_vector(), msg)
-                    response = response.split(":")
-                    if response[0] == "PEER_CONTRIBUTION":
-                        peer_contribution = response[1]
-                        if response[2] is None:
-                            print "Error: didn't receive IV"
-                        else:
-                            peer.set_initialization_vector(response[2])
-                            shared_key = pow(peer_contribution, peer.get_client_b(), self.peerPrime)
-                            peer.set_shared_key(shared_key)
-                            challenge = CryptoLib.generateRandomKey(16)
-                            msg = CryptoLib.encyptUsingSymmetricKey(peer.get_shared_key(),
-                                                                    peer.get_initialization_vector(), challenge)
-                            self.send_message(msg, peer.get_address()[0], peer.get_address()[1])
+        try:
+            msg, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
+            if self.peers.has_key(addr):
+                peer = self.peers.get(addr)
+                response = CryptoLib.decryptUsingSymetricKey(peer.get_shared_key(),
+                                                             peer.get_initialization_vector(), msg)
+                response = response.split(":")
+                if response[0] == "PEER_CONTRIBUTION":
+                    peer_contribution = response[1]
+                    if response[2] is None:
+                        print "Error: didn't receive IV"
                     else:
-                        print "Error: unknown message sent!!!"
-            except socket.timeout, e:
-                #print "Thread Error: ", e
-                msg = None
-            except (KeyboardInterrupt, SystemExit):
-                print "Got keyboard or system exit interrupt"
-                return
-            #finally:
-                #print "===== receive_peer_messages: RELEASING ====="
-                #self.lock.release()
+                        peer.set_initialization_vector(response[2])
+                        shared_key = pow(peer_contribution, peer.get_client_b(), self.peerPrime)
+                        peer.set_shared_key(shared_key)
+                        challenge = CryptoLib.generateRandomKey(16)
+                        msg = CryptoLib.encyptUsingSymmetricKey(peer.get_shared_key(),
+                                                                peer.get_initialization_vector(), challenge)
+                        self.send_message(msg, peer.get_address()[0], peer.get_address()[1])
+                else:
+                    print "Error: unknown message sent!!!"
+            elif addr == (self.serverAddr, self.port):
+                response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, msg)
+                response = response.split(":")
+                if response[0] == "DISCONNECTED":
+                    print " Server Disconnected us... Good bye!"
+                    sys.exit(0)
 
+        except socket.timeout, e:
+            #print "Thread Error: ", e
+            msg = None
 
     # Called when this client is requested by another client (msg[0] = "CONR")
     # The msg is decrypted into the ticket and username and they are passed to this function
@@ -442,37 +464,40 @@ def main(argv):
 
         # create the client, login and spawn a thread to
         # receive data continuously from the clients
-        lock = threading.Lock()
-        chatClient = ChatClient(ipAddr, port, lock)
+        chatClient = ChatClient(ipAddr, port)
 
         try:
             # login
             if chatClient.login() is True:
-                # Not sure we need to use a thread
-                #thread = threading.Thread(name='Messages', target=chatClient.receive_peer_messages)
-                #thread.daemon = True
-                #thread.start()
 
-            # wait for user to give us input
+                # wait for user to give us input
                 while True:
                     try:
-                        msg = raw_input("Type Your Messages: ")
-                        msgSplit = msg.split()
-                        if len(msgSplit) == 1:
-                            if msgSplit[0] == 'list':
-                                #lock.acquire
-                                chatClient.list_of_clients()
-                                #lock.release
-                        elif len(msgSplit) == 3:
-                            if msgSplit[0] == 'send':
-                                ret = chatClient.peer_connection(msgSplit[1], msgSplit[2])
-                                if ret is True:
-                                    print "connected to peer"
+                        print "Type Your Message: "
+                        rlist, wlist, elist = select.select([sys.stdin, chatClient.getSocket()], [], [])
+                        for event in rlist:
+                            if event == chatClient.getSocket():
+                                chatClient.receive_peer_messages()
+                            else:
+                                msg = sys.stdin.readline()
+                                msgSplit = msg.split()
+                                if len(msgSplit) == 1:
+                                    if msgSplit[0] == 'list':
+                                        chatClient.list_of_clients()
+                                    elif msgSplit[0] == 'bye':
+                                        chatClient.disconnectClient()
+                                elif len(msgSplit) == 3:
+                                    if msgSplit[0] == 'send':
+                                        ret = chatClient.peer_connection(msgSplit[1], msgSplit[2])
+                                        if ret is True:
+                                            print "connected to peer"
                     except (KeyboardInterrupt, SystemExit):
                         print "Got keyboard or system exit interrupt"
+                        chatClient.disconnectClient()
                         break
         except (KeyboardInterrupt, SystemExit):
-            print "Got keyboard or system exit interrupt"
+            #print "Got keyboard or system exit interrupt"
+            chatClient.disconnectClient()
             return
 
 if __name__ == "__main__":
