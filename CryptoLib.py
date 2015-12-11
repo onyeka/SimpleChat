@@ -64,7 +64,7 @@ def generateSaltedPasswordHash(hKey, salt, password):
     h = hmac.HMAC(hKey, hashes.SHA256(), backend=default_backend())
     h.update(salt + password)
     pwdHash = h.finalize()
-    print " password Hash: ", pwdHash.encode('hex')
+    #print " password Hash: ", pwdHash.encode('hex')
     return pwdHash.encode('hex')
 
 
@@ -82,11 +82,11 @@ def generatePublicPrivateKeys():
                                          format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     # Just writing them into files for now, we can decide where and how to store them, maybe just use variables?
-    with open("client_private_key.txt", "w") as f:
-        f.write(str(pem))
+    #with open("client_private_key.txt", "w") as f:
+        #f.write(str(pem))
 
-    with open("client_public_key.txt", "w") as f:
-        f.write(str(pem_public))
+    #with open("client_public_key.txt", "w") as f:
+        #f.write(str(pem_public))
 
     # Making the function also return them in case we want to store in variables.
     return pem, pem_public
@@ -99,7 +99,7 @@ def encryptUsingPublicKey(key, data):
     :param data: data to encrypt
     :return: cipher text
     """
-    print "Use private key to encrypt the data"
+    #print "Use private key to encrypt the data"
     cipher_text = key.encrypt(
         data,
         padding.OAEP(
@@ -119,7 +119,7 @@ def encyptUsingSymmetricKey(key, iv, data):
     :param data: data to encrypt
     :return: cipher text
     """
-    print "Use shared key to encrypt data"
+    #print "Use shared key to encrypt data"
     backend = default_backend()
     #key = os.urandom(32)
     #iv = os.urandom(16)
@@ -136,7 +136,7 @@ def decryptUsingPrivateKey(key, cipher):
     :param cipher:
     :return:
     """
-    print "Decrypt the data using private key"
+    #print "Decrypt the data using private key"
     data = key.decrypt(
         cipher,
         padding.OAEP(
@@ -156,7 +156,7 @@ def decryptUsingSymetricKey(key, iv, data):
     :param data: data to decrypt
     :return: cipher text
     """
-    print "Use shared key to decrypt data"
+    #print "Use shared key to decrypt data"
     backend = default_backend()
     cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=backend)
     decryptor = cipher.decryptor()

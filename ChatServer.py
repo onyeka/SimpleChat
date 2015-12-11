@@ -1,11 +1,7 @@
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
 from ConfigParser import SafeConfigParser
-import socket, logging, sys, Client, random, CryptoLib
+import socket, sys, Client, random, CryptoLib
 
 class ChatServer(object):
     """ Usage: prints out how to use the server
@@ -20,6 +16,7 @@ class ChatServer(object):
     def __init__(self):
         self.clients = {}
         self.count = 0
+        self.DBG = False
 
         # get server's private key
         self.private_key = self.getPrivateKey()
@@ -70,68 +67,105 @@ class ChatServer(object):
 
     # Handles messages sent from clients
     def handleClientMessages(self, msg, knownClient, addr):
-        print " message received: '%s'" % msg
+        if self.DBG is True:print " message received: '%s'" % msg
         msgContents = msg.split(":")
-        response = None
 
         if msgContents[0] == "AUTH":
-            self.challengeAnswer, challenge, firstFew = self.challengeResponse()
-            response = str(challenge) + ":" + str(firstFew)
-            print "sending AUTH Ans: %d, challenge: %d, firstFew: %d, msg: %s" % \
-                  (self.challengeAnswer, int(challenge, 16), firstFew, msg)
-            self.sendMessage(response, addr)
-            return
-        elif msgContents[0] == "SOLV":
+            if knownClient is not None:
+                print "client has already been Authenticated, ignore message..."
+            else:
+                self.challengeAnswer, challenge, firstFew = self.challengeResponse()
+                response = str(challenge) + ":" + str(firstFew)
+                self.sendMessage(response, addr)
+        elif msgContents[0] == "CONTRIBUTION":
             if int(msgContents[1]) == self.challengeAnswer:
-                print " solved!!!! %s, ans: %s, user: %s" % \
-                      (msgContents[1], self.challengeAnswer, msgContents[2])
+                if self.DBG is True: print "solved challenge!!!"
+                for existingClients in self.clients.values():
+                    if existingClients.get_name() == msgContents[2]:
+                        print "client already exists, removing old client..."
+                        msg = "DISCONNECTED:"
+                        msg = CryptoLib.encyptUsingSymmetricKey(existingClients.get_session_key(),
+                                                                existingClients.get_initialization_vector(),
+                                                                msg)
+                        self.sendMessage(msg, existingClients.get_address())
+                        self.clients.pop(existingClients.get_address())
+
+                # create and add new client to list
                 client = Client.User(msgContents[2], addr)
                 self.clients[addr] = client
-            return
-        elif msgContents[0] == "CONT":
-            clientContribution = msgContents[1]
-            #**************************************************
-            # Start authentication procedure (Augmented PDM)
-            #**************************************************
-            b = CryptoLib.generateRandomKey(16)
-            # retrieve the safe prime for the user
-            primeTag = 'P' + (self.clients[addr]).getName()
-            p = ChatServer.config.getint('SectionTwo', primeTag)
-            if p is None: self.sendMessage(response, addr)
+                #**************************************************
+                # Start authentication procedure (Augmented PDM)
+                #**************************************************
+                clientContribution = msgContents[3]
+                b = CryptoLib.generateRandomKey(16)
+                # retrieve the safe prime for the user
+                primeTag = 'P' + (self.clients[addr]).get_name()
+                try:
+                    p = ChatServer.config.getint('SectionTwo', primeTag)
+                except Exception, e:
+                    print "couldn't get prime...: ", e
+                    self.clients.pop(addr)
+                    return
+                # generate server contribution (2^b mod p) to send to server
+                serverContribution = pow(ChatServer.generator, int(b.encode('hex'), 16), p)
 
-            # generate server contribution (2^b mod p) to send to server
-            serverContribution = pow(ChatServer.generator, int(b.encode('hex'), 16), p)
+                # retrieve the password hash for the user
+                pwdHashTag = 'W' + (self.clients[addr]).get_name()
 
-            # retrieve the password hash for the user
-            pwdHashTag = 'W' + (self.clients[addr]).getName()
+                # 2^W mod p
+                try:
+                    pwdHashExp = ChatServer.config.getint('SectionTwo', pwdHashTag)
+                except Exception, e:
+                    print "couldn't get pwd hash...: ", e
+                    self.clients.pop(addr)
+                    return
 
-            # 2^W mod p
-            pwdHashExp = ChatServer.config.getint('SectionTwo', pwdHashTag)
-            print "2^W mod p for client: %s ==> %s" % (pwdHashTag, pwdHashExp)
+                #print "2^W mod p for client, pwdHashTag:%s ==> pwdHashExp:%s" % (pwdHashTag, pwdHashExp)
 
-            # 2^ab mod p
-            sharedKey1 = CryptoLib.generateSecretKey(int(clientContribution),
+                # 2^ab mod p
+                sharedKey1 = CryptoLib.generateSecretKey(int(clientContribution),
                                                      int(b.encode('hex'), 16), p)
+                # 2^bW mod p
+                sharedKey2 = CryptoLib.generateSecretKey(pwdHashExp, int(b.encode('hex'), 16), p)
 
-            # 2^bW mod p
-            sharedKey2 = CryptoLib.generateSecretKey(pwdHashExp, int(b.encode('hex'), 16), p)
-
-            sessionKey = (str(sharedKey1) + str(sharedKey2))[0:16]
-            print "Server: sharedKey1: %s, sharedKey2: %s, sessionKey: %s" % (sharedKey1,
-                                                                      sharedKey2, sessionKey)
-            # HASH(2^ab mod p, 2^bW modp)
-            sessionKeyHash = CryptoLib.generateKeyHash(sessionKey)
-            if knownClient is not None:
-                knownClient.setSessionKeyAndHash(sessionKey, sessionKeyHash)
-                knownClient.setInitializationVector(CryptoLib.generateRandomKey(16))
-                print " serverContribution: %s, sessionKeyHash: %s, IV: %s" % \
-                      (serverContribution,sessionKeyHash, knownClient.getInitializationVector())
-                response = str(serverContribution) + ":" + sessionKeyHash + ":" \
-                           + knownClient.getInitializationVector()
-                self.sendMessage(response, addr)
-                return
+                sessionKey = (str(sharedKey1) + str(sharedKey2))[0:16]
+                #print "Server: sharedKey1: %s, sharedKey2: %s, sessionKey: %s" % (sharedKey1,
+                #                                                      sharedKey2, sessionKey)
+                # HASH(2^ab mod p, 2^bW modp)
+                sessionKeyHash = CryptoLib.generateKeyHash(sessionKey)
+                if self.clients.get(addr) is not None:
+                    self.clients.get(addr).set_session_key_and_hash(sessionKey, sessionKeyHash)
+                    iv = CryptoLib.generateRandomKey(8).encode('hex')
+                    self.clients.get(addr).set_initialization_vector(iv)
+                    response = str(serverContribution) + ":" + sessionKeyHash + ":" + iv
+                    if self.DBG: print "====== sending: ", response
+                    self.sendMessage(response, addr)
+                    return
             else:
-                print "Server: unknown client!!!"
+                print "Invalid client!!!"
+
+        elif msgContents[0] == "DISCONNECTING":
+            msg = "DISCONNECTED:"
+            msg = CryptoLib.encyptUsingSymmetricKey(self.clients[addr].get_session_key(),
+                                                    self.clients[addr].get_initialization_vector(), msg)
+            self.sendMessage(msg, addr)
+            self.clients.pop(addr)
+
+        elif msgContents[0] == "VALIDATE":
+            if knownClient is not None and knownClient.get_session_key_hash() == msgContents[1]:
+                knownClient.set_public_key(msgContents[3])
+                msgContents[2] = int(msgContents[2]) +1
+                response = "ACKNOWLEDGE:" + str(msgContents[2])
+                response = CryptoLib.encyptUsingSymmetricKey(knownClient.get_session_key(),
+                                                             knownClient.get_initialization_vector(),
+                                                             response)
+                self.sendMessage(response, knownClient.get_address())
+                # client is fully authenticated
+                knownClient.set_authenticated = True
+            else:
+                if self.clients.has_key(knownClient.get_address()):
+                    self.clients.pop(knownClient.get_address())
+
         elif msgContents[0] == "CONP":
             peer_to_connect = msgContents[1]
             client1_address = knownClient.getAddress()
@@ -149,6 +183,17 @@ class ChatServer(object):
                 msg = "unknown client requested"
                 msg = CryptoLib.encyptUsingSymmetricKey(client1_shared_key, knownClient.getInitializationVector(), msg)
                 self.sendMessage(msg, client1_address)
+
+        elif msgContents[0] == "list":
+            if knownClient is not None and knownClient.get_session_key() is not None:
+                response = ""
+                for client in self.clients.values():
+                    response = response + client.get_name() + ","
+                print " list of clients: ", response
+                response = CryptoLib.encyptUsingSymmetricKey(knownClient.get_session_key(),
+                                                             knownClient.get_initialization_vector(),
+                                                             response)
+                self.sendMessage(response, knownClient.get_address())
         else:
             print "Server: unknown message: ", msg
 
@@ -161,30 +206,16 @@ class ChatServer(object):
             if(client == None):
                 print "couldn't retrieve client"
                 return
-            if client.getSessionKey() is None or client.getInitializationVector() is None:
-                #print "!!!!!! session key: %s, IV: %s" % (client.getSessionKey(),
-                #client.getInitializationVector())
+            if client.get_session_key() is None and client.get_initialization_vector() is None:
                 decrypted_msg = CryptoLib.decryptUsingPrivateKey(self.private_key, msg)
             else:
-                decrypted_msg = CryptoLib.decryptUsingSymetricKey(client.getSessionKey(),
-                                                             client.getInitializationVector(),
-                                                             msg)
+                decrypted_msg = CryptoLib.decryptUsingSymetricKey(client.get_session_key(),
+                                                             client.get_initialization_vector(), msg)
 
             self.handleClientMessages(decrypted_msg, client, addr)
         else:
-            print "it's a potential client!!"
+            if self.DBG: print "it's a potential client!!"
             self.handleClientMessages(msg, None, addr)
-
-    # def encyptUsingSymetricKey(self, key, iv, data):
-    #     print "Using shared key to encrypt data"
-    #     backend = default_backend()
-    #     cipher = Cipher(algorithms.AES(key), modes.CFB8(iv), backend=backend)
-    #     encryptor = cipher.encryptor()
-    #     ct = encryptor.update(data) + encryptor.finalize()
-    #     return ct
-
-    # def createToken(self, client1, client2):
-    #     print "Create token for the clients to talk to each other"
 
     # Should create 2 tokens, joined by ":" and encrypted with the shared key of the user requesting
     # the communication and send it to the user. The tokens contain 3 parts, the user address, the
