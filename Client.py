@@ -11,30 +11,30 @@ class User(object):
         self.publicKey = None
 
 
-    def getAddress(self):
+    def get_address(self):
         return self.address
 
-    def getInitializationVector(self):
+    def get_initialization_vector(self):
         return self.iv
 
-    def getName(self):
+    def get_name(self):
         return self.username
 
-    def getPublicKey(self):
+    def get_public_key(self):
         return self.publicKey
 
-    def getSessionKey(self):
+    def get_session_key(self):
         return self.sessionKey
 
-    def getSessionKeyHash(self):
+    def get_session_key_hash(self):
         return self.sessionKeyHash
 
-    def setPublicKey(self, publicKey):
+    def set_public_key(self, publicKey):
         self.publicKey = publicKey
 
-    def setSessionKeyAndHash(self, sessionKey, sessionKeyHash):
+    def set_session_key_and_hash(self, sessionKey, sessionKeyHash):
         self.sessionKey = sessionKey
         self.sessionKeyHash = sessionKeyHash
 
-    def setInitializationVector(self, iv):
+    def set_initialization_vector(self, iv):
         self.iv = iv
