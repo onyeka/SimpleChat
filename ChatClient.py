@@ -15,6 +15,9 @@ class ChatClient(object):
     """
     USAGE = 'usage: \tpython ChatClient.py -sip <server ip> -sp <server port>'
     '\t-h: prints this help message and exit'
+    CHAT_USAGE = 'valid messages: \t list' \
+                 '\t send USER MESSAGE' \
+                 '\t bye'
     DBG = False
 
     # Read parameters from config file
@@ -36,7 +39,7 @@ class ChatClient(object):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.settimeout(3.0)
         self.peers = {}
-        self.DBG = False
+        self.DBG = True
 
         self.serverPublicKey = CryptoLib.getPublicKey('server_public_key.pem')
         if(self.serverPublicKey == -1):
@@ -262,15 +265,17 @@ class ChatClient(object):
         print "list of clients: ", response
 
     # Called when this client wants to talk to another client
-    def authenticate_peer(self, username):
+    def peer_communication(self, peer_name, peer_msg):
         for address in self.peers:
-            if self.peers[address].get_username() == username:
-                self.peers[address].free()
-        ret = False
-        # choose a random iv
+            if self.peers[address].get_username() == peer_name:
+                peer_address = self.peers[address].get_address()
+                self.send_message(peer_msg, peer_address[0], peer_address[1])
 
-        # send server the username of the client we want to chat with
-        msg = "CONNECTPEER:" + username
+        print "====== authenticate PEER first"
+        ret = False
+
+        # send server the peer name of the client we want to chat with
+        msg = "CONNECT_PEER:" + peer_name
 
         # step 1: Request Server for the tickets
         msg = CryptoLib.encyptUsingSymmetricKey(self.sessionKey, self.sessionID, msg)
@@ -279,6 +284,10 @@ class ChatClient(object):
 
         # Step 2: receive the combined ticket from the server and split it into two parts
         combined_ticket = self.receive_response()
+        if combined_ticket is None:
+            print "failed to get ticket from server"
+            return
+
         print "got combined ticket", combined_ticket
 
         combined_ticket = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, combined_ticket)
@@ -286,74 +295,79 @@ class ChatClient(object):
         combined_ticket = combined_ticket.split(":")
         peer_key = combined_ticket[0]
         peer_iv = combined_ticket[1]
-        peer_address = combined_ticket[2]
-        peer_port = int(combined_ticket[3])
+        peer_address = (combined_ticket[2], int(combined_ticket[3]))
+        print "peer_address: ", peer_address
         peer_ticket = combined_ticket[4]
 
         print "=========== got all parts requesting client connection"
 
         # create peer object
-        peer = Peer.Peer(username, peer_address)
+        peer = Peer.Peer(peer_name, peer_address)
 
-        # Step 3: message to talk to peer encrypted with key given by the server
-        # message to peer contains peer's ticket
-        msg = "REQUEST_PEER_CONNECTION:" + str(self.username) + ":" + str(peer_ticket)
-        print "==========msg to be encrypted:", msg
-        print "===========length of iv:", len(peer_iv)
-        print "===========length of key:", len(peer_key)
-        msg = CryptoLib.encyptUsingSymmetricKey(peer_key, peer_iv, msg)
-        if not self.send_message(msg, peer_address, peer_port):
-            return ret
-
-        # Step 4: Receive peer's contribution for DH key
-        response = self.receive_response()
-        if response is None:
-            print "Error!!! Didn't receive contribution from peer: ", username
-            return ret
-        peer_contribution = CryptoLib.decryptUsingPrivateKey(self.clientPrivateKey, response)
-
-        # Step 5: Generate and send contribution for DH key as well as the initialization vector
-        a = CryptoLib.generateRandomKey(32)
-        peer_session_id = CryptoLib.generateRandomKey(16)
-        client_contribution = pow(self.peerGenerator, a, self.peerPrime)
-        msg = "PEER_CONTRIBUTION:" + str(client_contribution) + ":" + peer_session_id
-        msg = CryptoLib.encyptUsingSymmetricKey(peer_key, peer_iv, msg)
-        if not self.send_message(msg, peer_address, peer_port):
-            return ret
-
-        # Now construct the shared key and set iv and shared key to peer object
-        shared_key = pow(peer_contribution, a, self.peerPrime)
-
-        # Step 6: Challenge response (Two way authentication) - user receives challenge, user increments and sends
-        # back response which is again incremented and sent back to user. All of this is done using the symmetric
-        # key encryption with the shared key.
-        challenge = self.receive_response()
-        if challenge is None:
-            print "Error!!! Didn't receive challenge from peer"
-            return ret
-        challenge = int(CryptoLib.decryptUsingSymetricKey(shared_key, peer_session_id, challenge))
-        challenge += 1
-
-        msg = "PEER_CHALLENGE:" + str(challenge)
-        msg = CryptoLib.encyptUsingSymmetricKey(shared_key, peer_session_id, msg)
-        if not self.send_message(msg, peer_address, peer_port):
+        # Step 3: send peer ticket to peer and wait for response. Note:
+        # the ticket is already encrypted so peer should know how to decrypt it
+        if not self.send_message(peer_ticket, peer_address[0], peer_address[1]):
             return ret
 
         response = self.receive_response()
         if response is None:
-            print "Error!!! Didn't receive response from peer"
+            print "Error!!! Didn't receive contribution from peer: ", peer_name
             return ret
-        response = int(CryptoLib.decryptUsingSymetricKey(shared_key, peer_session_id, response))
 
-        # If authentication is successful, add the peer to list of connected peers
-        if response == challenge + 1:
-            peer.set_initialization_vector(peer_session_id)
-            peer.set_shared_key(shared_key)
-            peer.set_authenticated_flag(True)
-            self.peers[username] = peer
-            return True
+        # Step 4: handle peer response and begin authentication
+        response = CryptoLib.decryptUsingSymmetricKey(peer_key, peer_iv, response)
+        response = response.split(":")
+        if response[0] == "PEER_CONNECT_RESPONSE":
+            peer_contribution = response[1]
 
-        return False
+            # Step 5: Generate shared key and DH contribution
+            a = CryptoLib.generateRandomKey(32).encode('hex')
+            client_contribution = pow(self.peerGenerator, a, self.peerPrime)
+
+            peer_session_key = pow(peer_contribution, a, self.peerPrime)
+
+            msg = "PEER_CONTRIBUTION:" + str(client_contribution)
+            msg = CryptoLib.encyptUsingSymmetricKey(peer_key, peer_iv, msg)
+
+            if not self.send_message(msg, peer_address[0], peer_address[1]):
+                return ret
+
+            # Step 6: Receive peer's challenge and IV
+            response = self.receive_response()
+            if response is None:
+                print "Error!!! Didn't receive contribution from peer: ", peer_name
+                return ret
+
+            response = CryptoLib.decryptUsingSymmetricKey(peer_key, peer_iv, response)
+            response = response.split(":")
+            if response[0] == "PEER_CHALLENGE":
+                challenge = int(response[1])
+                peer_session_id = response[2]
+                challenge += 1
+                msg = "PEER_CHALLENGE_RESPONSE:" + str(challenge)
+                msg = CryptoLib.encyptUsingSymmetricKey(peer_session_key,
+                                                        peer_session_id, msg)
+
+                if not self.send_message(msg, peer_address[0], peer_address[1]):
+                    return ret
+
+                # Step 7: Receive peer's acknowledgement and save peer info
+                response = self.receive_response()
+                if response is None:
+                    print "Error!!! Didn't receive acknowledgement from peer: ", peer_name
+                    return ret
+                response = CryptoLib.decryptUsingSymmetricKey(peer_session_key, peer_session_id, response)
+                response = response.split(":")
+                if response == "PEER_ACKNOWLEDGE":
+                    peer.set_peer_session_key(peer_session_key)
+                    peer.set_initialization_vector(peer_session_id)
+                    self.peers[peer_address] = peer
+                    ret = True
+            else:
+                print "Error!!! didn't receive challenge response from peer"
+                return ret
+
+        return ret
 
     def receive_peer_messages(self):
         """
@@ -364,7 +378,7 @@ class ChatClient(object):
             msg, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
             if self.peers.has_key(addr):
                 peer = self.peers.get(addr)
-                response = CryptoLib.decryptUsingSymetricKey(peer.get_shared_key(),
+                response = CryptoLib.decryptUsingSymetricKey(peer.get_peer_session_key(),
                                                              peer.get_initialization_vector(), msg)
                 response = response.split(":")
                 if response[0] == "PEER_CONTRIBUTION":
@@ -382,11 +396,48 @@ class ChatClient(object):
                 else:
                     print "Error: unknown message sent!!!"
             elif addr == (self.serverAddr, self.port):
-                response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, msg)
-                response = response.split(":")
-                if response[0] == "DISCONNECTED":
-                    print " Server Disconnected us... Good bye!"
-                    sys.exit(0)
+                    response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, msg)
+                    response = response.split(":")
+                    if response[0] == "DISCONNECTED":
+                        print " Server Disconnected us... Good bye!"
+                        sys.exit(0)
+            else:
+                print "TICKET: ", msg
+                msg = msg.split(",")
+                try:
+                    CryptoLib.verifyMessage(msg[0], msg[1], self.serverPublicKey)
+                    response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, msg)
+                    response = response.split(":")
+                    if response[0] == "PEER_CONNECT_REQUEST":
+                            ret = False
+                            temp_key = response[1]
+                            temp_iv = response[2]
+                            peer_name = response[3]
+                            peer_address = (response[4], int(response[5]))
+
+                            # Step 1: Generate DH contribution
+                            b = CryptoLib.generateRandomKey(32).encode('hex')
+                            peer_contribution = pow(self.peerGenerator, b, self.peerPrime)
+                            msg = "PEER_CONNECT_RESPONSE:" + str(peer_contribution)
+                            msg = CryptoLib.encyptUsingSymmetricKey(temp_key, temp_iv, msg)
+                            if not self.send_message(msg, peer_address[0], peer_address[1]):
+                                return ret
+                            # Step 2: Receive connecting client's DH contribution
+                            response = self.receive_response()
+                            if response is None:
+                                print "Error!!! Didn't receive contribution from peer: ", peer_name
+                                return ret
+
+                            response = CryptoLib.decryptUsingSymetricKey(temp_key, temp_iv, msg)
+                            response = response.split(":")
+                            print "response: ", response
+                            # create peer object
+                            peer = Peer.Peer(peer_name, peer_address)
+                            peer.set_peer_session_key(temp_key)
+                            peer.set_initialization_vector(temp_iv)
+                            self.peers[peer_address] = peer
+                except Exception, e:
+                    print " Error received: ", e
 
         except socket.timeout, e:
             #print "Thread Error: ", e
@@ -481,10 +532,12 @@ def main(argv):
                                         chatClient.disconnectClient()
                                 elif len(msgSplit) == 3:
                                     if msgSplit[0] == 'send':
-                                        ret = chatClient.authenticate_peer(msgSplit[1])
+                                        ret = chatClient.peer_communication(msgSplit[1], msgSplit[2])
                                         if ret is True:
                                             print "connected to peer"
-
+                                else:
+                                    print "Invalid message: ", msg
+                                    print chatClient.CHAT_USAGE
 
                     except (KeyboardInterrupt, SystemExit):
                         print "Got keyboard or system exit interrupt"

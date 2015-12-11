@@ -16,7 +16,7 @@ class ChatServer(object):
     def __init__(self):
         self.clients = {}
         self.count = 0
-        self.DBG = False
+        self.DBG = True
 
         # get server's private key
         self.private_key = self.getPrivateKey()
@@ -166,22 +166,22 @@ class ChatServer(object):
                 if self.clients.has_key(knownClient.get_address()):
                     self.clients.pop(knownClient.get_address())
 
-        elif msgContents[0] == "CONP":
+        elif msgContents[0] == "CONNECT_PEER":
             peer_to_connect = msgContents[1]
-            client1_address = knownClient.getAddress()
-            client1_key = knownClient.getPublicKey()
+            client1_address = knownClient.get_address()
+            #client1_key = knownClient.getPublicKey()
             client2_address = None
             client2_key = None
-            client1_shared_key = knownClient.getSessionKey()
+            client1_shared_key = knownClient.get_session_key()
             for address in self.clients:
-                if self.clients[address].getName() == peer_to_connect:
+                if self.clients[address].get_name() == peer_to_connect:
                     client2_address = address
-                    client2_key = self.clients[address].getPublicKey()
+                    #client2_key = self.clients[address].getPublicKey()
             if client2_address is not None:
-                self.create_token(client1_address,client2_address,client1_key,client2_key, client1_shared_key)
+                self.create_token(client1_address,client2_address, client1_shared_key)
             else:
                 msg = "unknown client requested"
-                msg = CryptoLib.encyptUsingSymmetricKey(client1_shared_key, knownClient.getInitializationVector(), msg)
+                msg = CryptoLib.encyptUsingSymmetricKey(client1_shared_key, knownClient.get_initialization_vector(), msg)
                 self.sendMessage(msg, client1_address)
 
         elif msgContents[0] == "list":
@@ -225,15 +225,20 @@ class ChatServer(object):
         peer1_port = user1_address[1]
         peer2_address = user2_address[0]
         peer2_port = user2_address[1]
-        peer2_shared_key = self.clients[user2_address].get_session_key()
+        peer2_session_key = self.clients[user2_address].get_session_key()
         peer1_iv = self.clients[user1_address].get_initialization_vector()
         peer2_iv = self.clients[user2_address].get_initialization_vector()
-        shared_key = os.urandom(16).encode("hex")
-        shared_iv = os.urandom(8).encode("hex")
-        token_1 = str(shared_key) + ":" + str(shared_iv) + ":" + str(peer2_address) + ":" + str(peer2_port)
-        token_2 = str(shared_key) + ":" + str(shared_iv) + ":" + str(peer1_address) + ":" + str(peer1_port)
-        token_2 = CryptoLib.encyptUsingSymmetricKey(peer2_shared_key, peer2_iv, token_2)
+        temp_key = CryptoLib.generateRandomKey(16).encode("hex")
+        temp_iv = CryptoLib.generateRandomKey(8).encode("hex")
+        token_1 = str(temp_key) + ":" + str(temp_iv) + ":" + str(peer2_address) + ":" + str(peer2_port)
+
+        token_2 = "PEER_CONNECT_REQUEST:" + str(temp_key) + ":" + str(temp_iv) + ":" + \
+                  self.clients[user1_address].get_name() + ":" + str(peer1_address) + ":" + str(peer1_port)
+        token_2 = CryptoLib.encyptUsingSymmetricKey(peer2_session_key, peer2_iv, token_2)
+        token_2_signature = CryptoLib.signEncryptedMsg(self.private_key, token_2)
+        token_2 = token_2_signature + "," + token_2
         token = token_1 + ":" + token_2
+        print " token: ", token
         token = CryptoLib.encyptUsingSymmetricKey(key, peer1_iv, token)
         self.sendMessage(token, user1_address)
 
