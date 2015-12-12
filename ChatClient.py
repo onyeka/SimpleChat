@@ -321,7 +321,7 @@ class ChatClient(object):
                     peer_session_key = pow(int(peer_contribution), int(a, 16), self.peerPrime)
                     peer_session_id = CryptoLib.generateRandomKey(8).encode("hex")
 
-                    msg = "PEER_CONTRIBUTION:" + str(client_contribution) + ":" + str(peer_session_id)
+                    msg = "PEER_CONTRIBUTION:" + str(client_contribution) + ":" + peer_session_id
                     print "++++++++ sending client contribution: ", msg
                     msg = CryptoLib.encyptUsingSymmetricKey(peer_key, peer_iv, msg)
 
@@ -335,7 +335,7 @@ class ChatClient(object):
                         return ret
 
                     print "+++++++++ key: %s, iv: %s" % (str(peer_session_key),peer_session_id)
-                    response = CryptoLib.decryptUsingSymetricKey(str(peer_session_key), peer_session_id, response)
+                    response = CryptoLib.decryptUsingSymetricKey(int(peer_session_key), peer_session_id, response)
                     response = response.split(":")
                     print "======== response: ", response
                     if response[0] == "PEER_CHALLENGE":
@@ -449,7 +449,7 @@ class ChatClient(object):
                             print "=======  session key: %s, iv: %s" % (str(peer_session_key), peer_iv)
                             challenge = random.randrange(1,1000)
                             msg = "PEER_CHALLENGE:" + str(challenge)
-                            msg = CryptoLib.encyptUsingSymmetricKey(str(peer_session_key), peer_iv, msg)
+                            msg = CryptoLib.encyptUsingSymmetricKey(int(peer_session_key), peer_iv, msg)
                             print "====sending peer challenge: ", msg
                             if not self.send_message(msg, peer_address[0], peer_address[1]):
                                 return ret
