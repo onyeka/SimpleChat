@@ -235,8 +235,8 @@ class ChatServer(object):
         token_2 = "PEER_CONNECT_REQUEST:" + str(temp_key) + ":" + str(temp_iv) + ":" + \
                   self.clients[user1_address].get_name() + ":" + str(peer1_address) + ":" + str(peer1_port)
         token_2 = CryptoLib.encyptUsingSymmetricKey(peer2_session_key, peer2_iv, token_2)
-        token_2_signature = CryptoLib.signEncryptedMsg(self.private_key, token_2)
-        token_2 = token_2_signature + "," + token_2
+        # token_2_signature = CryptoLib.signEncryptedMsg(self.private_key, token_2)
+        # token_2 = str(token_2_signature) + "," + str(token_2)
         token = token_1 + ":" + token_2
         print " token: ", token
         token = CryptoLib.encyptUsingSymmetricKey(key, peer1_iv, token)
