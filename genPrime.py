@@ -31,3 +31,9 @@ def genp(username, password):
     p = next_prime(sum)
     sp = p * 2 + 1
     return sp
+
+def genp2(value):
+    sum = value
+    p = next_prime(sum)
+    sp = p * 2 + 1
+    return sp

@@ -232,14 +232,17 @@ class ChatServer(object):
         temp_iv = CryptoLib.generateRandomKey(8).encode("hex")
         token_1 = str(temp_key) + ":" + str(temp_iv) + ":" + str(peer2_address) + ":" + str(peer2_port)
 
-        token_2 = "PEER_CONNECT_REQUEST:" + str(temp_key) + ":" + str(temp_iv) + ":" + str(peer1_address) + ":" + str(peer1_port)
+        token_2 = "PEER_CONNECT_REQUEST:" + str(temp_key) + ":" + str(temp_iv) + ":" + \
+                  str(peer1_address) + ":" + str(peer1_port) + ":" + self.clients[user1_address].get_name()
 
         token_2 = CryptoLib.encyptUsingSymmetricKey(peer2_session_key, peer2_iv, token_2)
+        print "+++++++ length of token 2: ", len(token_2)
         # token_2_signature = CryptoLib.signEncryptedMsg(self.private_key, token_2)
         # token_2 = str(token_2_signature) + "," + str(token_2)
         token = token_1 + ":" + token_2
         print " token: ", token
         token = CryptoLib.encyptUsingSymmetricKey(key, peer1_iv, token)
+        print "+++++++ length of token total: ", len(token)
         self.sendMessage(token, user1_address)
 
 
