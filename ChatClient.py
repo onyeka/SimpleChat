@@ -424,12 +424,12 @@ class ChatClient(object):
                                 ret = False
                                 temp_key = response[1]
                                 temp_iv = response[2]
-                                peer_name = response[3]
-                                peer_address = (response[4], int(response[5]))
+                                # peer_name = response[3]
+                                peer_address = (response[3], int(response[4]))
 
                                 # Step 1: Generate DH contribution
                                 b = CryptoLib.generateRandomKey(32).encode('hex')
-                                peer_contribution = pow(self.peerGenerator, b, self.peerPrime)
+                                peer_contribution = pow(self.generator, int(b.encode('hex'), 16), self.peerPrime)
                                 msg = "PEER_CONNECT_RESPONSE:" + str(peer_contribution)
                                 msg = CryptoLib.encyptUsingSymmetricKey(temp_key, temp_iv, msg)
                                 print "========sending peer contribution"
@@ -438,14 +438,14 @@ class ChatClient(object):
                                 # Step 2: Receive connecting client's DH contribution
                                 response = self.receive_response()
                                 if response is None:
-                                    print "Error!!! Didn't receive contribution from peer: ", peer_name
+                                    print "Error!!! Didn't receive contribution from peer "
                                     return ret
 
                                 response = CryptoLib.decryptUsingSymetricKey(temp_key, temp_iv, response)
                                 response = response.split(":")
                                 print "response: ", response
                                 peer_iv = response[2]
-                                peer_session_key = pow(response[1], b, self.peerPrime)
+                                peer_session_key = pow(int(response[1]), int(b.encode('hex'), 16), self.peerPrime)
                                 challenge = random.randrange(1,1000)
                                 msg = "PEER_CHALLENGE:" + str(challenge)
                                 msg = CryptoLib.encyptUsingSymmetricKey(peer_session_key, peer_iv, msg)
@@ -467,7 +467,7 @@ class ChatClient(object):
                                     return ret
                                 client_msg = self.receive_response()
                                 client_msg = CryptoLib.decryptUsingSymetricKey(peer_session_key, peer_iv, client_msg)
-                                print "=====> message from %s : %s" %(peer_name, client_msg)
+                                print "=====> message from %s : %s" %(peer_address, client_msg)
                                 # create peer object
                                 peer = Peer.Peer(peer_name, peer_address)
                                 peer.set_peer_session_key(temp_key)
