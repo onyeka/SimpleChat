@@ -259,11 +259,11 @@ class ChatClient(object):
         #with tLock:
             try:
                 for address in self.peers:
-                    if self.peers[address].get_username() == peer_name:
+                    if self.peers[address].get_peer_name() == peer_name:
                         peer_address = self.peers[address].get_address()
                         self.send_message(peer_msg, peer_address[0], peer_address[1])
 
-                print "====== authenticate PEER first"
+                print "====== authenticate PEER first, MSG: ", peer_msg
                 ret = False
 
                 # send server the peer name of the client we want to chat with
@@ -284,7 +284,7 @@ class ChatClient(object):
 
                 combined_ticket = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, combined_ticket)
                 print "\n decrypted combined ticket", combined_ticket
-                combined_ticket = combined_ticket.split(":")
+                combined_ticket = combined_ticket.split("###")
                 peer_key = combined_ticket[0]
                 peer_iv = combined_ticket[1]
                 peer_address = (combined_ticket[2], int(combined_ticket[3]))
@@ -309,7 +309,7 @@ class ChatClient(object):
 
                 # Step 4: handle peer response and begin authentication
                 response = CryptoLib.decryptUsingSymetricKey(peer_key, peer_iv, response)
-                print "========recieved peer contribution response:", response
+                ##print "========recieved peer contribution response:", response
                 response = response.split(":")
                 if response[0] == "PEER_CONNECT_RESPONSE":
                     peer_contribution = response[1]
@@ -322,7 +322,7 @@ class ChatClient(object):
                     peer_session_id = CryptoLib.generateRandomKey(8).encode("hex")
 
                     msg = "PEER_CONTRIBUTION:" + str(client_contribution) + ":" + peer_session_id
-                    print "++++++++ sending client contribution: ", msg
+                    #print "++++++++ sending client contribution: ", msg
                     msg = CryptoLib.encyptUsingSymmetricKey(peer_key, peer_iv, msg)
 
                     if not self.send_message(msg, peer_address[0], peer_address[1]):
@@ -334,10 +334,9 @@ class ChatClient(object):
                         print "Error!!! Didn't receive challenge from peer: ", peer_name
                         return ret
 
-                    print "+++++++++ key: %s, iv: %s" % (str(peer_session_key),peer_session_id)
-                    response = CryptoLib.decryptUsingSymetricKey(int(peer_session_key), peer_session_id, response)
+                    #print "+++++++++ key: %s, iv: %s" % (str(peer_session_key),peer_session_id)
+                    response = CryptoLib.decryptUsingSymetricKey(str(peer_session_key), peer_session_id, response)
                     response = response.split(":")
-                    print "======== response: ", response
                     if response[0] == "PEER_CHALLENGE":
                         challenge = int(response[1])
                         challenge += 1
@@ -353,14 +352,14 @@ class ChatClient(object):
                         if response is None:
                             print "Error!!! Didn't receive acknowledgement from peer: ", peer_name
                             return ret
-                        response = CryptoLib.decryptUsingSymetricKey(peer_session_key, peer_session_id, response)
+                        response = CryptoLib.decryptUsingSymetricKey(str(peer_session_key), peer_session_id, response)
                         response = response.split(":")
-                        if response == "PEER_ACKNOWLEDGE":
-                            peer.set_peer_session_key(peer_session_key)
+                        if response[0] == "PEER_ACKNOWLEDGE":
+                            peer.set_peer_session_key(str(peer_session_key))
                             peer.set_initialization_vector(peer_session_id)
                             self.peers[peer_address] = peer
-                            print "=======recieved acknowledgement sending message across"
-                            peer_msg = CryptoLib.encyptUsingSymmetricKey(peer_session_key, peer_iv, peer_msg)
+                            print "=======recieved acknowledgement sending message across, MSG: ", peer_msg
+                            peer_msg = CryptoLib.encyptUsingSymmetricKey(str(peer_session_key), peer_session_id, peer_msg)
                             if not self.send_message(peer_msg, peer_address[0], peer_address[1]):
                                 return ret
                             ret = True
@@ -382,23 +381,9 @@ class ChatClient(object):
             msg, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
             if self.peers.has_key(addr):
                 peer = self.peers.get(addr)
-                response = CryptoLib.decryptUsingSymetricKey(peer.get_peer_session_key(),
+                msg = CryptoLib.decryptUsingSymetricKey(peer.get_peer_session_key(),
                                                              peer.get_initialization_vector(), msg)
-                response = response.split(":")
-                #if response[0] == "PEER_CONTRIBUTION":
-                #    peer_contribution = response[1]
-                #    if response[2] is None:
-                #        print "Error: didn't receive IV"
-                #    else:
-                #        peer.set_initialization_vector(response[2])
-                #        shared_key = pow(peer_contribution, peer.get_client_b(), self.peerPrime)
-                #        peer.set_shared_key(shared_key)
-                #        challenge = CryptoLib.generateRandomKey(16)
-                #        msg = CryptoLib.encyptUsingSymmetricKey(peer.get_shared_key(),
-                #                                                peer.get_initialization_vector(), challenge)
-                #        self.send_message(msg, peer.get_address()[0], peer.get_address()[1])
-                #else:
-                #    print "Error: unknown message sent!!!"
+                print "%s Says:\t %s" % (peer.get_peer_name(), msg)
             elif addr == (self.serverAddr, self.port):
                     response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, msg)
                     response = response.split(":")
@@ -416,7 +401,7 @@ class ChatClient(object):
                 #except Exception, e:
                     #print " Error received: ", e
 
-                response = response.split(":")
+                response = response.split("###")
                 print "=======token after decryption:", response
                 if response[0] == "PEER_CONNECT_REQUEST":
                         ret = False
@@ -449,7 +434,7 @@ class ChatClient(object):
                             print "=======  session key: %s, iv: %s" % (str(peer_session_key), peer_iv)
                             challenge = random.randrange(1,1000)
                             msg = "PEER_CHALLENGE:" + str(challenge)
-                            msg = CryptoLib.encyptUsingSymmetricKey(int(peer_session_key), peer_iv, msg)
+                            msg = CryptoLib.encyptUsingSymmetricKey(str(peer_session_key), peer_iv, msg)
                             print "====sending peer challenge: ", msg
                             if not self.send_message(msg, peer_address[0], peer_address[1]):
                                 return ret
@@ -458,23 +443,29 @@ class ChatClient(object):
                             if response is None:
                                 print "Error!!! Didn't receive a response for challenge from peer: ", peer_name
                                 return ret
-                            response = CryptoLib.decryptUsingSymetricKey(peer_session_key, peer_iv, response)
+                            response = CryptoLib.decryptUsingSymetricKey(str(peer_session_key), peer_iv, response)
                             response = response.split(":")
+                            print "VVVVVV Response: ", response
                             if not response[0] == "PEER_CHALLENGE_RESPONSE" and int(response[1]) == challenge + 1:
                                 return ret
                             print "====response is correct sending acknowledgement"
-                            msg = "PEER_ACKNOWLEDGE"
-                            msg = CryptoLib.encyptUsingSymmetricKey(peer_session_key, peer_iv, msg)
+                            msg = "PEER_ACKNOWLEDGE:"
+                            msg = CryptoLib.encyptUsingSymmetricKey(str(peer_session_key), peer_iv, msg)
                             if not self.send_message(msg, peer_address[0], peer_address[1]):
                                 return ret
                             client_msg = self.receive_response()
-                            client_msg = CryptoLib.decryptUsingSymetricKey(peer_session_key, peer_iv, client_msg)
-                            print "=====> message from %s : %s" %(peer_address, client_msg)
+                            print "===== peer message: ", client_msg
+                            if client_msg is not None:
+                                client_msg = CryptoLib.decryptUsingSymetricKey(str(peer_session_key),
+                                                                               peer_iv, client_msg)
+                            #print "=====> message from %s : %s" %(peer_address, client_msg)
+
                             # create peer object
                             peer = Peer.Peer(peer_name, peer_address)
-                            peer.set_peer_session_key(temp_key)
-                            peer.set_initialization_vector(temp_iv)
+                            peer.set_peer_session_key(peer_session_key)
+                            peer.set_initialization_vector(peer_iv)
                             self.peers[peer_address] = peer
+                            print "%s Says:\t %s" % (peer.get_peer_name(), client_msg)
                 else:
                     print "Wrong msg type error"
 
@@ -584,7 +575,7 @@ def main(argv):
                                         chatClient.disconnectClient()
                                 elif len(msgSplit) == 3:
                                     if msgSplit[0] == 'send':
-                                        print "======= got send message from client"
+                                        print "======= got send message from client: ", msgSplit
                                         chatClient.peer_communication(tLock, msgSplit[1], msgSplit[2])
                                         #cT = threading.Thread(target=chatClient.peer_communication(tLock, msgSplit[1], msgSplit[2]))
                                         #cT.start()
