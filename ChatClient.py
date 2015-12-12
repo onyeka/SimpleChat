@@ -51,6 +51,14 @@ class ChatClient(object):
         if self.isAuthenticated == True:
             msg = "DISCONNECTING:"
             self.send_encrypted_message(msg)
+            for address in self.peers:
+                if self.peers.has_key(address):
+                    peer_address = address
+                    ps_key = self.peers[address].get_peer_session_key()
+                    peer_iv = self.peers[address].get_initialization_vector()
+                    peer_msg = CryptoLib.encyptUsingSymmetricKey(str(ps_key), peer_iv, "bye")
+                    self.send_message(peer_msg, peer_address[0], peer_address[1])
+                    return
 
     def login(self):
         while self.count != 0:
@@ -255,12 +263,14 @@ class ChatClient(object):
 
     # Called when this client wants to talk to another client
     def peer_communication(self, peer_name, peer_msg):
+        if peer_name == self.username:
+            print "can't chat with yourself!!!"
         for address in self.peers:
             if self.peers[address].get_peer_name() == peer_name:
                 peer_address = address
-                peer_session_key = self.peers[address].get_peer_session_key()
+                ps_key = self.peers[address].get_peer_session_key()
                 peer_iv = self.peers[address].get_initialization_vector()
-                peer_msg = CryptoLib.encyptUsingSymmetricKey(str(peer_session_key), peer_iv, peer_msg)
+                peer_msg = CryptoLib.encyptUsingSymmetricKey(str(ps_key), peer_iv, peer_msg)
                 self.send_message(peer_msg, peer_address[0], peer_address[1])
                 return
 
@@ -366,24 +376,23 @@ class ChatClient(object):
         else:
             print "Error!!! didn't receive challenge response from peer"
             return ret
-    #finally:
-        #l = "hello"
-        #tLock.release()
 
     def receive_peer_messages(self, tLock):
         """
         Reads messages from socket
         :return: data read
         """
-        #with tLock:
         try:
-
             msg, addr = self.sock.recvfrom(ChatClient.MSG_LEN)
             if self.peers.has_key(addr):
                 peer = self.peers.get(addr)
                 msg = CryptoLib.decryptUsingSymetricKey(peer.get_peer_session_key(),
                                                              peer.get_initialization_vector(), msg)
-                print "%s Says:\t %s" % (peer.get_peer_name(), msg)
+                if msg == "bye":
+                    print "good bye: ", peer.get_peer_name()
+                    self.peers.pop(addr)
+                else:
+                    print "%s Says:\t %s" % (peer.get_peer_name(), msg)
             elif addr == (self.serverAddr, self.port):
                     response = CryptoLib.decryptUsingSymetricKey(self.sessionKey, self.sessionID, msg)
                     response = response.split(":")
@@ -445,8 +454,11 @@ class ChatClient(object):
                             client_msg = CryptoLib.decryptUsingSymetricKey(str(peer_session_key),
                                                                            peer_iv, client_msg)
                         # create peer object
+                        if self.peers.has_key(peer_address):
+                            print "removing old peer..."
+                            self.peers.pop(peer_address)
                         peer = Peer.Peer(peer_name, peer_address)
-                        peer.set_peer_session_key(peer_session_key)
+                        peer.set_peer_session_key(str(peer_session_key))
                         peer.set_initialization_vector(peer_iv)
                         self.peers[peer_address] = peer
                         print "%s Says:\t %s" % (peer.get_peer_name(), client_msg)
@@ -512,7 +524,7 @@ def main(argv):
                         chatClient.disconnectClient()
                         break
         except (KeyboardInterrupt, SystemExit):
-            #print "Got keyboard or system exit interrupt"
+            print "Got keyboard or system exit interrupt"
             chatClient.disconnectClient()
             return
 
